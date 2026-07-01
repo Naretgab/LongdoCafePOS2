@@ -2189,6 +2189,66 @@ function removePosQr(){
   showToast('ลบ QR หน้าขายแล้ว','success');
 }
 
+// ── BACKUP / RESTORE (Export / Import) ────────────────────────
+function exportData(){
+  try{
+    const data = {};
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith('ld_')) data[k] = localStorage.getItem(k);
+    }
+    const backup = { app:'longdo-pos', exportedAt:new Date().toISOString(), data };
+    const blob = new Blob([JSON.stringify(backup)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const now = new Date();
+    const pad = n=>String(n).padStart(2,'0');
+    const fname = `${pad(now.getDate())}-${pad(now.getMonth()+1)}-${now.getFullYear()+543}_${pad(now.getHours())}${pad(now.getMinutes())}.json`;
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('ส่งออกข้อมูลสำเร็จ','success');
+  }catch(err){
+    console.error(err);
+    showToast('ส่งออกข้อมูลไม่สำเร็จ: '+err.message,'error');
+  }
+}
+
+function importData(event){
+  const file = event.target.files && event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const backup = JSON.parse(e.target.result);
+      if(!backup || typeof backup.data !== 'object'){
+        throw new Error('รูปแบบไฟล์ไม่ถูกต้อง (ไม่พบ data)');
+      }
+      const keys = Object.keys(backup.data);
+      if(keys.length === 0){
+        throw new Error('ไฟล์นี้ไม่มีข้อมูลให้นำเข้า');
+      }
+      const ok = confirm(`นำเข้าข้อมูล ${keys.length} รายการ จะเขียนทับข้อมูลปัจจุบันทั้งหมด\nต้องการดำเนินการต่อหรือไม่?`);
+      if(!ok){ event.target.value=''; return; }
+      keys.forEach(k=>{
+        localStorage.setItem(k, backup.data[k]);
+      });
+      showToast('นำเข้าข้อมูลสำเร็จ กำลังโหลดหน้าใหม่...','success');
+      setTimeout(()=>location.reload(), 1200);
+    }catch(err){
+      console.error(err);
+      showToast('นำเข้าข้อมูลไม่สำเร็จ: '+err.message,'error');
+    }finally{
+      event.target.value='';
+    }
+  };
+  reader.onerror = function(){
+    showToast('อ่านไฟล์ไม่สำเร็จ','error');
+    event.target.value='';
+  };
+  reader.readAsText(file);
+}
+
 // ── SERVICE WORKER REGISTER ───────────────────────────────────
 if('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
