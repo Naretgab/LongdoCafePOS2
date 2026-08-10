@@ -23,7 +23,7 @@ const SUPABASE_CONFIG = {
 };
 
 const SyncEngine = (() => {
-  const SYNC_TABLES = { orders: 'orders', customers: 'customers' };
+  const SYNC_TABLES = { customers: 'customers', orders: 'orders' }; // customers first: orders can carry a customer_id that must exist for FK-safe apps, and even without a FK this keeps bootstrap/merge order sane
   const QUEUE_KEY = 'ld_syncQueue';
   const SNAP_PREFIX = 'ld_syncSnapshot_';
 
