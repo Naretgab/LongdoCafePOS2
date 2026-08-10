@@ -10,6 +10,10 @@ const DB = {
   set(k,v) {
     try {
       localStorage.setItem('ld_'+k, JSON.stringify(v));
+      // Phase 1 of Supabase migration: only 'orders' and 'customers' sync;
+      // everything else stays local-only, same as before. No-op if Supabase
+      // isn't configured or SyncEngine hasn't loaded.
+      if (typeof SyncEngine !== 'undefined') SyncEngine.onSet(k, v);
       return true;
     } catch(e) {
       dbWriteErrors.unshift({key:k, time:new Date().toISOString(), message:e.message||String(e)});
@@ -192,6 +196,7 @@ async function migrateImagesToIndexedDB() {
 }
 window.addEventListener('DOMContentLoaded', async () => {
   initDB();
+  if (typeof SyncEngine !== 'undefined') SyncEngine.init(); // Supabase sync: orders + customers only (phase 1)
   updateTopbarDate();
   setInterval(updateTopbarDate, 60000);
 

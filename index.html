@@ -94,6 +94,12 @@ html, body { height: 100%; overflow: hidden; font-family: 'Sarabun', sans-serif;
 .topbar-title { font-family: 'Sarabun', sans-serif; font-size: 1.25rem; color: var(--text); font-weight: 600; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 .topbar-date { font-size: 0.82rem; color: var(--muted); }
+.sync-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; background:#bbb; transition:background .3s; }
+.sync-dot[data-state="off"] { background:#bbb; }
+.sync-dot[data-state="syncing"] { background:#f5a623; animation:syncPulse 1s infinite; }
+.sync-dot[data-state="synced"] { background:#2ecc71; }
+.sync-dot[data-state="error"] { background:#e74c3c; }
+@keyframes syncPulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
 .badge { background: var(--caramel); color: white; font-size: 0.72rem; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
 
 /* CONTENT */
@@ -893,6 +899,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         <div class="topbar-title" id="pageTitle">หน้าขาย POS</div>
       </div>
       <div class="topbar-right">
+        <span id="syncStatusDot" class="sync-dot" data-state="off"></span>
         <div class="topbar-date" id="topbarDate"></div>
         <div class="badge" id="topbarSales">฿0</div>
       </div>
@@ -1941,6 +1948,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="supabase-sync.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
