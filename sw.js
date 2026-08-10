@@ -1,6 +1,6 @@
 // Long Do POS — Service Worker
 // ⚠️ เปลี่ยนเลขเวอร์ชันนี้ทุกครั้งที่แก้ไข app.js / index.html เพื่อบังคับอัปเดตแอป
-const CACHE = 'longdo-pos-v7';
+const CACHE = 'longdo-pos-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -28,6 +28,15 @@ self.addEventListener('activate', e => {
 // Network-first สำหรับไฟล์หลัก (HTML / app.js) เพื่อให้เห็นโค้ดใหม่ทันที
 // Cache-first สำหรับไฟล์อื่น (font ฯลฯ) เพื่อความเร็ว/ใช้งานออฟไลน์
 self.addEventListener('fetch', e => {
+  // ปล่อยผ่านตรงๆ ไม่แตะเลยสำหรับ request ที่ไม่ใช่ GET (เช่น POST/PATCH ไปยัง
+  // Supabase REST API ตอนซิงค์ข้อมูล) เพราะ Cache API เก็บได้เฉพาะ GET เท่านั้น —
+  // ถ้าไม่กันไว้ตรงนี้จะเจอ error "Request method 'POST' is unsupported"
+  if (e.request.method !== 'GET') return;
+
+  // ปล่อยผ่าน request ที่ไปยัง Supabase ทั้งหมด (ทั้ง REST และ Realtime websocket)
+  // ไม่ต้อง cache หรือ intercept ใดๆ — ให้เบราว์เซอร์จัดการเองตามปกติ
+  if (e.request.url.includes('.supabase.co')) return;
+
   const isCore = e.request.destination === 'document' || e.request.url.endsWith('app.js') || e.request.url.endsWith('supabase-sync.js');
 
   if (isCore) {
