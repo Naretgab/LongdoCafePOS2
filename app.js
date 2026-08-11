@@ -196,7 +196,7 @@ async function migrateImagesToIndexedDB() {
 }
 window.addEventListener('DOMContentLoaded', async () => {
   initDB();
-  if (typeof SyncEngine !== 'undefined') SyncEngine.init(); // Supabase sync: orders + customers only (phase 1)
+  if (typeof SyncEngine !== 'undefined') SyncEngine.init(); // Supabase sync
   updateTopbarDate();
   setInterval(updateTopbarDate, 60000);
 
