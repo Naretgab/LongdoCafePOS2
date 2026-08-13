@@ -229,6 +229,12 @@ function formatYMD(d) {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+// ราคาต่อหน่วย = ยอดรวมของรายการ / จำนวนชิ้น — ปัดให้อ่านง่าย (จำนวนเต็มถ้าลงตัว)
+function unitPriceOf(item) {
+  if (!item.qty) return 0;
+  const u = item.total / item.qty;
+  return Number.isInteger(u) ? u : Math.round(u * 100) / 100;
+}
 function monthKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -542,8 +548,20 @@ function openItemEditor(menuId, cartIdx) {
   if(confirmBtn) confirmBtn.textContent = cartIdx !== null ? '✅ อัปเดตรายการ' : '✅ เพิ่มลงบิล';
   // Store working addons in a temporary array on the modal
   window._editorAddons = selAddons;
+  window._editorQty = existing ? existing.qty : 1;
+  document.getElementById('itemEditorQty').textContent = window._editorQty;
   updateItemEditorTotal(basePrice);
   openModal('itemEditorModal');
+}
+
+function changeItemEditorQty(delta) {
+  window._editorQty = Math.max(1, (window._editorQty||1) + delta);
+  document.getElementById('itemEditorQty').textContent = window._editorQty;
+  const menuId = parseInt(document.getElementById('itemEditorMenuId').value);
+  const menu = DB.get('menus').find(m=>m.id===menuId);
+  const priceKey = posType==='grab'?'p2':posType==='lineman'?'p3':'p1';
+  const basePrice = menu ? (menu[priceKey]||menu.p1) : 0;
+  updateItemEditorTotal(basePrice);
 }
 
 function toggleAddonOpt(groupId, optId, optName, optPrice, isMulti) {
@@ -591,6 +609,15 @@ function updateItemEditorTotal(basePrice) {
   }
   unitPrice = Math.max(0, unitPrice);
   document.getElementById('itemEditorTotal').textContent = '฿'+unitPrice;
+  const qty = window._editorQty||1;
+  const lineRow = document.getElementById('itemEditorLineTotalRow');
+  if(qty>1) {
+    lineRow.style.display = 'flex';
+    document.getElementById('itemEditorQtyLabel').textContent = qty;
+    document.getElementById('itemEditorLineTotal').textContent = '฿'+(unitPrice*qty);
+  } else {
+    lineRow.style.display = 'none';
+  }
 }
 
 function onItemEditorChange() {
@@ -637,16 +664,17 @@ function confirmItemEditor() {
     menuId, name:menu.name, icon:menu.icon, price:basePrice, cost:menu.cost||0,
     addons, note, customPrice, itemDiscount:itemDiscountVal, itemDiscountType
   };
+  const qty = window._editorQty||1;
 
   if(editingCartIdx !== null) {
     const old = cart[editingCartIdx];
-    cart[editingCartIdx] = {...old, ...itemData, qty:old.qty, total:old.qty*unitPrice};
+    cart[editingCartIdx] = {...old, ...itemData, qty, total:qty*unitPrice};
   } else {
-    cart.push({...itemData, qty:1, total:unitPrice});
+    cart.push({...itemData, qty, total:qty*unitPrice});
   }
   closeModal('itemEditorModal');
   updateCartUI();
-  showToast((editingCartIdx!==null?'✏️ แก้ไข':'✅ เพิ่ม')+' '+menu.name, 'success');
+  showToast((editingCartIdx!==null?'✏️ แก้ไข':'✅ เพิ่ม')+' '+menu.name+(qty>1?' x'+qty:''), 'success');
 }
 
 function removeCartItem(cartIdx) {
@@ -860,7 +888,7 @@ function buildReceiptPreview() {
         const hasCustom=i.customPrice!==null&&i.customPrice!==undefined;
         const hasDisc=(i.itemDiscount||0)>0&&!hasCustom;
         const discLabel=hasDisc?(i.itemDiscountType==='pct'?`-${i.itemDiscount}%`:`-฿${i.itemDiscount}`):'';
-        return `<div class="receipt-row receipt-row-item"><span>${i.name} x${i.qty}</span><span>฿${i.total}</span></div>
+        return `<div class="receipt-row receipt-row-item"><span>${i.name} x${i.qty}${i.qty>1?` · ฿${unitPriceOf(i)}/ชิ้น`:''}</span><span>฿${i.total}</span></div>
         ${addonStr?`<div style="font-size:0.82rem;font-weight:700;color:var(--ink);padding-left:8px;">↳ ${addonStr}</div>`:''}
         ${hasCustom?`<div style="font-size:0.78rem;font-weight:700;color:var(--sage);padding-left:8px;">💰 ราคาพิเศษ</div>`:''}
         ${hasDisc?`<div style="font-size:0.78rem;font-weight:700;color:var(--red);padding-left:8px;">🏷️ ส่วนลด ${discLabel}</div>`:''}
@@ -1012,7 +1040,7 @@ function printReceipt(order) {
     const hasCustom = i.customPrice!==null && i.customPrice!==undefined;
     const hasDisc = (i.itemDiscount||0)>0 && !hasCustom;
     const discLabel = hasDisc ? (i.itemDiscountType==='pct' ? `-${i.itemDiscount}%` : `-฿${i.itemDiscount}`) : '';
-    return `<div class="row menu-row"><span>${i.name} x${i.qty}</span><span>฿${i.total}</span></div>
+    return `<div class="row menu-row"><span>${i.name} x${i.qty}${i.qty>1?` · ฿${unitPriceOf(i)}/ชิ้น`:''}</span><span>฿${i.total}</span></div>
       ${addonStr ? `<div class="sub">&#8627; ${addonStr}</div>` : ''}
       ${hasCustom ? `<div class="sub green">&#128176; ราคาพิเศษ</div>` : ''}
       ${hasDisc ? `<div class="sub red">&#128247; ส่วนลด ${discLabel}</div>` : ''}
@@ -1028,7 +1056,8 @@ function printReceipt(order) {
     const addonStr = (i.addons&&i.addons.length) ? i.addons.map(a=>a.name).join(',') : '';
     const hasDisc = (i.itemDiscount||0)>0 && !i.customPrice;
     const discStr = hasDisc ? (i.itemDiscountType==='pct' ? '-'+i.itemDiscount+'%' : '-'+i.itemDiscount) : '';
-    return JSON.stringify({namepart, pricepart, pad, addonStr, hasDisc, discStr, note:(i.note||'').substring(0,24)});
+    const unitStr = i.qty>1 ? ('Unit B'+unitPriceOf(i)) : '';
+    return JSON.stringify({namepart, pricepart, pad, addonStr, hasDisc, discStr, unitStr, note:(i.note||'').substring(0,24)});
   });
 
   const shopName = JSON.stringify(shopInfo.name||'Long Do Cafe & Bakery');
@@ -1132,6 +1161,7 @@ function buildESC(){
   var items=${escItemsJSON};
   items.forEach(function(i){
     var s=i.namepart+' '.repeat(i.pad)+'B'+i.pricepart;p(ESC,69,1);t(s);p(ESC,69,0);lf();
+    if(i.unitStr){t('  '+i.unitStr);lf();}
     if(i.addonStr){p(ESC,69,1);t('  +'+i.addonStr.substring(0,30));p(ESC,69,0);lf();}
     if(i.hasDisc){p(ESC,69,1);t('  Disc: '+i.discStr);p(ESC,69,0);lf();}
     if(i.note){p(ESC,69,1);t('  '+i.note);p(ESC,69,0);lf();}
@@ -1357,7 +1387,7 @@ function viewOrder(id) {
         const hasCustom=i.customPrice!==null&&i.customPrice!==undefined;
         const hasDisc=(i.itemDiscount||0)>0&&!hasCustom;
         const discLabel=hasDisc?(i.itemDiscountType==='pct'?`-${i.itemDiscount}%`:`-฿${i.itemDiscount}`):'';
-        return `<div class="receipt-row receipt-row-item"><span>${i.icon||''} ${i.name} x${i.qty}</span><span>฿${i.total}</span></div>
+        return `<div class="receipt-row receipt-row-item"><span>${i.icon||''} ${i.name} x${i.qty}${i.qty>1?` · ฿${unitPriceOf(i)}/ชิ้น`:''}</span><span>฿${i.total}</span></div>
         ${addonStr?`<div style="font-size:0.82rem;font-weight:700;color:var(--ink);padding-left:8px;">↳ ${addonStr}</div>`:''}
         ${hasCustom?`<div style="font-size:0.78rem;font-weight:700;color:var(--sage);padding-left:8px;">💰 ราคาพิเศษ</div>`:''}
         ${hasDisc?`<div style="font-size:0.78rem;font-weight:700;color:var(--red);padding-left:8px;">🏷️ ส่วนลด ${discLabel}</div>`:''}
