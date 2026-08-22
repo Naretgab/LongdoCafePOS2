@@ -91,11 +91,12 @@ const SyncEngine = (() => {
     return {
       id: i.id, name: i.name, unit: i.unit || '', price: i.price,
       price_type: i.priceType || 'thb', stock: i.stock, expiry: i.expiry || '',
+      purchase_price: i.purchasePrice ?? null, purchase_qty: i.purchaseQty ?? null,
       updated_at: new Date().toISOString(),
     };
   }
   function rowToIng(r) {
-    return { id: r.id, name: r.name, unit: r.unit || '', price: r.price, priceType: r.price_type || 'thb', stock: r.stock, expiry: r.expiry || '' };
+    return { id: r.id, name: r.name, unit: r.unit || '', price: r.price, priceType: r.price_type || 'thb', stock: r.stock, expiry: r.expiry || '', purchasePrice: r.purchase_price, purchaseQty: r.purchase_qty };
   }
 
   function expToRow(e) {

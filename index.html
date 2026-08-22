@@ -1643,13 +1643,18 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
       <button class="modal-close" onclick="closeModal('ingModal')">×</button>
     </div>
     <div class="form-group"><div class="form-label">ชื่อวัตถุดิบ *</div><input class="form-control" id="ingName"></div>
+    <div class="form-group"><div class="form-label">หน่วย</div><input class="form-control" id="ingUnit" placeholder="กรัม/มล/ชิ้น" oninput="updateIngUnitPriceCalc()"></div>
     <div class="form-row">
-      <div class="form-group"><div class="form-label">หน่วย</div><input class="form-control" id="ingUnit" placeholder="กรัม/มล/ชิ้น"></div>
       <div class="form-group">
-        <div class="form-label" id="ingPriceLabel">ราคา/หน่วย ฿</div>
-        <input class="form-control" type="number" id="ingPrice" step="0.01">
+        <div class="form-label" id="ingPriceLabel">ราคาต่อชิ้น ฿</div>
+        <input class="form-control" type="number" id="ingPrice" step="0.01" oninput="updateIngUnitPriceCalc()">
+      </div>
+      <div class="form-group" id="ingPurchaseQtyGroup">
+        <div class="form-label">ปริมาณ/แพ็ค</div>
+        <input class="form-control" type="number" id="ingPurchaseQty" step="0.01" placeholder="เช่น 1000" oninput="updateIngUnitPriceCalc()">
       </div>
     </div>
+    <div id="ingUnitPriceCalcRow" style="font-size:0.78rem;color:var(--caramel);font-weight:600;margin:-8px 0 14px;">= ฿0.00 / หน่วย</div>
     <div class="form-group">
       <div class="form-label">ประเภทราคา</div>
       <div style="display:flex;gap:6px;">

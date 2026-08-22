@@ -1,6 +1,6 @@
 // Long Do POS — Service Worker
 // ⚠️ เปลี่ยนเลขเวอร์ชันนี้ทุกครั้งที่แก้ไข app.js / index.html เพื่อบังคับอัปเดตแอป
-const CACHE = 'longdo-pos-v11';
+const CACHE = 'longdo-pos-v12';
 const ASSETS = [
   './',
   './index.html',
