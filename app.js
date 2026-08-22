@@ -2128,12 +2128,19 @@ function renderIngTable(){
 // แล้วคำนวณราคาต่อหน่วยใหม่ + อัปเดตต้นทุนเมนูที่เกี่ยวข้องให้ตรงกัน
 function fixSwappedIngredientPricing(onlySelected){
   const ings = DB.get('ingredients');
-  let affected = ings.filter(i => (i.priceType||'thb')!=='pct' && i.purchasePrice!=null && i.purchaseQty!=null);
-  if(onlySelected) affected = affected.filter(i => ingSelectedIds.has(i.id));
-  if(!affected.length){ showToast(onlySelected ? 'ยังไม่ได้เลือกวัตถุดิบที่จะสลับ' : 'ไม่พบวัตถุดิบที่มีข้อมูลราคา/ปริมาณให้สลับ', 'error'); return; }
+  let affected;
+  if(onlySelected){
+    // เลือกเองแบบติ๊กช่อง — เชื่อการเลือกของผู้ใช้ตรงๆ ไม่กรองซ้ำว่ามี purchasePrice/purchaseQty ครบหรือไม่
+    // (บางรายการอาจเป็นของเก่าที่มีแค่ price เดียว ไม่เคยมีสองค่านี้แยกกันมาก่อน)
+    affected = ings.filter(i => (i.priceType||'thb')!=='pct' && ingSelectedIds.has(i.id));
+  } else {
+    affected = ings.filter(i => (i.priceType||'thb')!=='pct' && i.purchasePrice!=null && i.purchaseQty!=null);
+  }
+  if(!affected.length){ showToast(onlySelected ? 'รายการที่เลือกไม่ใช่วัตถุดิบแบบราคาบาท (โหมด % สลับไม่ได้)' : 'ไม่พบวัตถุดิบที่มีข้อมูลราคา/ปริมาณให้สลับ', 'error'); return; }
   if(!confirm(`จะสลับค่า "ราคาต่อชิ้น" กับ "ปริมาณ/แพ็ค" ของวัตถุดิบ ${affected.length} รายการ แล้วคำนวณราคาต่อหน่วยใหม่ทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
   affected.forEach(i => {
-    const oldPrice = i.purchasePrice, oldQty = i.purchaseQty;
+    const oldPrice = i.purchasePrice!=null ? i.purchasePrice : i.price; // ของเก่าที่ไม่เคยมี purchasePrice ให้ถือว่าค่า price เดิมคือฝั่งราคา
+    const oldQty = i.purchaseQty!=null ? i.purchaseQty : 1;             // และปริมาณเดิมคือ 1 (ค่าตั้งต้นเดียวกับตอนเปิดแก้ไขของเก่า)
     i.purchasePrice = oldQty;
     i.purchaseQty = oldPrice;
     i.price = i.purchaseQty>0 ? i.purchasePrice/i.purchaseQty : 0;
