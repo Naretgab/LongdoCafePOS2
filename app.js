@@ -2130,20 +2130,19 @@ function fixSwappedIngredientPricing(onlySelected){
   const ings = DB.get('ingredients');
   let affected;
   if(onlySelected){
-    // เลือกเองแบบติ๊กช่อง — เชื่อการเลือกของผู้ใช้ตรงๆ ไม่กรองซ้ำว่ามี purchasePrice/purchaseQty ครบหรือไม่
-    // (บางรายการอาจเป็นของเก่าที่มีแค่ price เดียว ไม่เคยมีสองค่านี้แยกกันมาก่อน)
+    // เลือกเองแบบติ๊กช่อง — เชื่อการเลือกของผู้ใช้ตรงๆ ไม่กรองซ้ำว่ามีข้อมูลครบหรือไม่
     affected = ings.filter(i => (i.priceType||'thb')!=='pct' && ingSelectedIds.has(i.id));
   } else {
-    affected = ings.filter(i => (i.priceType||'thb')!=='pct' && i.purchasePrice!=null && i.purchaseQty!=null);
+    affected = ings.filter(i => (i.priceType||'thb')!=='pct' && i.unit && i.purchaseQty!=null);
   }
-  if(!affected.length){ showToast(onlySelected ? 'รายการที่เลือกไม่ใช่วัตถุดิบแบบราคาบาท (โหมด % สลับไม่ได้)' : 'ไม่พบวัตถุดิบที่มีข้อมูลราคา/ปริมาณให้สลับ', 'error'); return; }
-  if(!confirm(`จะสลับค่า "ราคาต่อชิ้น" กับ "ปริมาณ/แพ็ค" ของวัตถุดิบ ${affected.length} รายการ แล้วคำนวณราคาต่อหน่วยใหม่ทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
+  if(!affected.length){ showToast(onlySelected ? 'รายการที่เลือกไม่ใช่วัตถุดิบแบบราคาบาท (โหมด % สลับไม่ได้)' : 'ไม่พบวัตถุดิบที่มีข้อมูลหน่วย/ปริมาณให้สลับ', 'error'); return; }
+  if(!confirm(`จะสลับค่า "หน่วย" กับ "ปริมาณ/แพ็ค" ของวัตถุดิบ ${affected.length} รายการ แล้วคำนวณราคาต่อหน่วยใหม่ทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
   affected.forEach(i => {
-    const oldPrice = i.purchasePrice!=null ? i.purchasePrice : i.price; // ของเก่าที่ไม่เคยมี purchasePrice ให้ถือว่าค่า price เดิมคือฝั่งราคา
-    const oldQty = i.purchaseQty!=null ? i.purchaseQty : 1;             // และปริมาณเดิมคือ 1 (ค่าตั้งต้นเดียวกับตอนเปิดแก้ไขของเก่า)
-    i.purchasePrice = oldQty;
-    i.purchaseQty = oldPrice;
-    i.price = i.purchaseQty>0 ? i.purchasePrice/i.purchaseQty : 0;
+    const oldUnit = i.unit!=null ? i.unit : '';
+    const oldQty = i.purchaseQty!=null ? i.purchaseQty : 1;
+    i.unit = String(oldQty);           // ค่าที่เคยอยู่ในช่องปริมาณ/แพ็ค ย้ายไปเป็นหน่วยแทน
+    i.purchaseQty = parseFloat(oldUnit)||0; // ค่าที่เคยอยู่ในช่องหน่วย (ตัวเลข) ย้ายมาเป็นปริมาณ/แพ็คแทน
+    i.price = i.purchaseQty>0 && i.purchasePrice!=null ? i.purchasePrice/i.purchaseQty : i.price;
   });
   DB.set('ingredients', ings);
   // Recalculate cost for all menus using these ingredients
