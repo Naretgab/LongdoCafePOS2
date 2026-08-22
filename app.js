@@ -2083,12 +2083,23 @@ function renderIngTable(){
 
 let ingPriceTypeSel = 'thb';
 
+// แยกตัวเลขปริมาณกับหน่วยออกจากข้อความเดียว เช่น "1000 กรัม" -> {qty:1000, unit:"กรัม"}
+function parsePackQty(text) {
+  text = (text||'').trim();
+  const m = text.match(/^([\d.]+)\s*(.*)$/);
+  if (m) return { qty: parseFloat(m[1])||0, unit: (m[2]||'').trim() || 'หน่วย' };
+  return { qty: 0, unit: text || 'หน่วย' };
+}
+
 function setIngPriceType(type) {
   ingPriceTypeSel = type;
   document.getElementById('ingPriceTypeThbBtn').classList.toggle('active', type==='thb');
   document.getElementById('ingPriceTypePctBtn').classList.toggle('active', type==='pct');
   document.getElementById('ingPriceLabel').textContent = type==='pct' ? '% ต่อหน่วย' : 'ราคาต่อชิ้น ฿';
-  document.getElementById('ingPurchaseQtyGroup').style.display = type==='pct' ? 'none' : '';
+  // ช่องปริมาณ/แพ็คยังต้องอยู่ต่อในโหมด % ด้วย เพราะเป็นที่เดียวที่ระบุ "หน่วย" ของวัตถุดิบ
+  // (แค่ไม่เอาไปหารราคา เพราะ % ไม่ต้องหาร)
+  document.getElementById('ingPurchaseQtyLabel').textContent = type==='pct' ? 'หน่วยนับ' : 'ปริมาณ/แพ็ค';
+  document.getElementById('ingPurchaseQty').placeholder = type==='pct' ? 'เช่น ชิ้น' : 'เช่น 1000 กรัม';
   document.getElementById('ingUnitPriceCalcRow').style.display = type==='pct' ? 'none' : '';
   updateIngUnitPriceCalc();
 }
@@ -2097,8 +2108,7 @@ function setIngPriceType(type) {
 function updateIngUnitPriceCalc(){
   if(ingPriceTypeSel==='pct') return;
   const price = parseFloat(document.getElementById('ingPrice').value)||0;
-  const qty = parseFloat(document.getElementById('ingPurchaseQty').value)||0;
-  const unit = document.getElementById('ingUnit').value||'หน่วย';
+  const { qty, unit } = parsePackQty(document.getElementById('ingPurchaseQty').value);
   const unitPrice = qty>0 ? price/qty : 0;
   document.getElementById('ingUnitPriceCalcRow').textContent = '= ฿'+(Number.isInteger(unitPrice)?unitPrice:unitPrice.toFixed(2))+' / '+unit;
 }
@@ -2110,24 +2120,24 @@ function openIngModal(id=null){
     const i=DB.get('ingredients').find(x=>x.id===id);
     if(i){
       document.getElementById('ingName').value=i.name;
-      document.getElementById('ingUnit').value=i.unit;
       document.getElementById('ingStock').value=i.stock;
       document.getElementById('ingExpiry').value=i.expiry||'';
       setIngPriceType(i.priceType||'thb');
       if((i.priceType||'thb')==='pct'){
         document.getElementById('ingPrice').value=i.price;
-        document.getElementById('ingPurchaseQty').value='';
+        document.getElementById('ingPurchaseQty').value=i.unit||'';
       } else {
         // วัตถุดิบเก่าที่บันทึกไว้ก่อนมีช่อง "ปริมาณ/แพ็ค" จะยังไม่มี purchasePrice/purchaseQty —
         // ให้ถือว่าซื้อมา 1 หน่วยในราคาต่อหน่วยเดิม (ไม่กระทบต้นทุนที่คำนวณไว้เดิม)
         document.getElementById('ingPrice').value = i.purchasePrice!=null ? i.purchasePrice : i.price;
-        document.getElementById('ingPurchaseQty').value = i.purchaseQty!=null ? i.purchaseQty : 1;
+        const qty = i.purchaseQty!=null ? i.purchaseQty : 1;
+        document.getElementById('ingPurchaseQty').value = `${qty} ${i.unit||''}`.trim();
       }
       updateIngUnitPriceCalc();
     }
   }
   else{
-    ['ingName','ingUnit','ingPrice','ingPurchaseQty','ingStock','ingExpiry'].forEach(i=>document.getElementById(i).value='');
+    ['ingName','ingPrice','ingPurchaseQty','ingStock','ingExpiry'].forEach(i=>document.getElementById(i).value='');
     setIngPriceType('thb');
     updateIngUnitPriceCalc();
   }
@@ -2138,13 +2148,13 @@ function saveIng(){
   const name=document.getElementById('ingName').value.trim();
   if(!name){showToast('กรุณาใส่ชื่อวัตถุดิบ','error');return;}
   const ings=DB.get('ingredients');
-  const unit=document.getElementById('ingUnit').value||'ชิ้น';
   const rawPrice=parseFloat(document.getElementById('ingPrice').value)||0; // ราคาต่อชิ้นที่ซื้อ (thb) หรือ % (pct)
+  const { qty:parsedQty, unit } = parsePackQty(document.getElementById('ingPurchaseQty').value);
   let unitPrice, purchasePrice=null, purchaseQty=null;
   if(ingPriceTypeSel==='pct'){
     unitPrice = rawPrice;
   } else {
-    purchaseQty = parseFloat(document.getElementById('ingPurchaseQty').value)||1;
+    purchaseQty = parsedQty||1;
     purchasePrice = rawPrice;
     unitPrice = purchaseQty>0 ? purchasePrice/purchaseQty : 0; // ← ราคาต่อหน่วยที่คำนวณอัตโนมัติ ใช้ผูกกับต้นทุนเมนู
   }
