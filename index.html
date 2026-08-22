@@ -1154,6 +1154,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
             <option value="date_asc">เพิ่มก่อนสุดก่อน</option>
           </select>
           <button class="btn btn-primary" onclick="openIngModal()">+ เพิ่มวัตถุดิบ</button>
+          <button class="btn btn-ghost" onclick="fixSwappedIngredientPricing()" title="ใช้ครั้งเดียวถ้าเผลอกรอกราคากับปริมาณสลับช่องกันตอนก่อนหน้านี้">🔀 สลับราคา/ปริมาณที่กรอกผิด</button>
         </div>
         <div class="card">
           <div class="table-wrap">
@@ -1649,8 +1650,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         <input class="form-control" type="number" id="ingPrice" step="0.01" oninput="updateIngUnitPriceCalc()">
       </div>
       <div class="form-group" id="ingPurchaseQtyGroup">
-        <div class="form-label" id="ingPurchaseQtyLabel">ปริมาณ/แพ็ค</div>
-        <input class="form-control" id="ingPurchaseQty" placeholder="เช่น 1000 กรัม" oninput="updateIngUnitPriceCalc()">
+        <div class="form-label">ปริมาณ/แพ็ค</div>
+        <input class="form-control" type="number" id="ingPurchaseQty" step="0.01" placeholder="เช่น 1000" oninput="updateIngUnitPriceCalc()">
       </div>
     </div>
     <div id="ingUnitPriceCalcRow" style="font-size:0.78rem;color:var(--caramel);font-weight:600;margin:-8px 0 14px;">= ฿0.00 / หน่วย</div>

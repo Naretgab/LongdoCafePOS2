@@ -1649,7 +1649,7 @@ function refreshIngSelect() {
   const sel = document.getElementById('recipeIngSel');
   if(!sel) return;
   sel.innerHTML = ings.length
-    ? ings.map(i=>`<option value="${i.id}">${i.name} (${i.unit}) — ${i.priceType==='pct'?i.price+'%':'฿'+i.price}/${i.unit}</option>`).join('')
+    ? ings.map(i=>`<option value="${i.id}">${i.name}${i.unit?` (${i.unit})`:''} — ${i.priceType==='pct'?i.price+'%':'฿'+i.price}${i.unit?'/'+i.unit:''}</option>`).join('')
     : '<option value="">ไม่มีวัตถุดิบ</option>';
 }
 
@@ -2064,13 +2064,13 @@ function renderIngTable(){
     let status='pill-green',statusTxt='ปกติ';
     if(daysLeft!==null&&daysLeft<0){status='pill-red';statusTxt='หมดอายุ';}
     else if(daysLeft!==null&&daysLeft<=7){status='pill-gold';statusTxt='ใกล้หมด '+(daysLeft)+'วัน';}
-    const priceLabel = i.priceType==='pct' ? `${i.price}%/${i.unit}` : `฿${Number.isInteger(i.price)?i.price:i.price.toFixed(2)}/${i.unit}`;
-    const priceSub = (i.priceType!=='pct' && i.purchasePrice!=null && i.purchaseQty) ? `<div style="font-size:0.7rem;color:var(--muted);">฿${i.purchasePrice}/${i.purchaseQty}${i.unit}</div>` : '';
+    const priceLabel = i.priceType==='pct' ? `${i.price}%${i.unit?'/'+i.unit:''}` : `฿${Number.isInteger(i.price)?i.price:i.price.toFixed(2)}${i.unit?'/'+i.unit:''}`;
+    const priceSub = (i.priceType!=='pct' && i.purchasePrice!=null && i.purchaseQty) ? `<div style="font-size:0.7rem;color:var(--muted);">฿${i.purchasePrice}/${i.purchaseQty}${i.unit?(' '+i.unit):''}</div>` : '';
     return `<tr>
       <td style="font-weight:600;">${i.name}</td>
-      <td>${i.unit}</td>
+      <td>${i.unit||'—'}</td>
       <td>${priceLabel}${priceSub}</td>
-      <td>${i.stock} ${i.unit}</td>
+      <td>${i.stock}${i.unit?' '+i.unit:''}</td>
       <td>${i.expiry||'—'}</td>
       <td><span class="pill ${status}">${statusTxt}</span></td>
       <td><div class="td-actions">
@@ -2081,25 +2081,45 @@ function renderIngTable(){
   }).join('');
 }
 
-let ingPriceTypeSel = 'thb';
-
-// แยกตัวเลขปริมาณกับหน่วยออกจากข้อความเดียว เช่น "1000 กรัม" -> {qty:1000, unit:"กรัม"}
-function parsePackQty(text) {
-  text = (text||'').trim();
-  const m = text.match(/^([\d.]+)\s*(.*)$/);
-  if (m) return { qty: parseFloat(m[1])||0, unit: (m[2]||'').trim() || 'หน่วย' };
-  return { qty: 0, unit: text || 'หน่วย' };
+// ใช้ครั้งเดียว: สลับค่า "ราคาต่อชิ้น" กับ "ปริมาณ/แพ็ค" ของวัตถุดิบทุกตัว (เผื่อกรอกสลับช่องกันไว้ก่อนหน้านี้)
+// แล้วคำนวณราคาต่อหน่วยใหม่ + อัปเดตต้นทุนเมนูที่เกี่ยวข้องให้ตรงกัน
+function fixSwappedIngredientPricing(){
+  const ings = DB.get('ingredients');
+  const affected = ings.filter(i => (i.priceType||'thb')!=='pct' && i.purchasePrice!=null && i.purchaseQty!=null);
+  if(!affected.length){ showToast('ไม่พบวัตถุดิบที่มีข้อมูลราคา/ปริมาณให้สลับ', 'error'); return; }
+  if(!confirm(`จะสลับค่า "ราคาต่อชิ้น" กับ "ปริมาณ/แพ็ค" ของวัตถุดิบ ${affected.length} รายการ แล้วคำนวณราคาต่อหน่วยใหม่ทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
+  affected.forEach(i => {
+    const oldPrice = i.purchasePrice, oldQty = i.purchaseQty;
+    i.purchasePrice = oldQty;
+    i.purchaseQty = oldPrice;
+    i.price = i.purchaseQty>0 ? i.purchasePrice/i.purchaseQty : 0;
+  });
+  DB.set('ingredients', ings);
+  // Recalculate cost for all menus using these ingredients
+  const menus=DB.get('menus');
+  let updated=false;
+  menus.forEach((m,idx)=>{
+    if(m.recipe&&m.recipe.length){
+      const newCost=Math.round(m.recipe.reduce((s,r)=>{
+        const ing=ings.find(i=>i.id===r.ingId);
+        return s+(ing?ing.price*r.qty:0);
+      },0)*100)/100;
+      if(menus[idx].cost!==newCost){menus[idx].cost=newCost;updated=true;}
+    }
+  });
+  if(updated) DB.set('menus',menus);
+  renderIngTable();
+  showToast(`✅ สลับค่าให้แล้ว ${affected.length} รายการ`, 'success');
 }
+
+let ingPriceTypeSel = 'thb';
 
 function setIngPriceType(type) {
   ingPriceTypeSel = type;
   document.getElementById('ingPriceTypeThbBtn').classList.toggle('active', type==='thb');
   document.getElementById('ingPriceTypePctBtn').classList.toggle('active', type==='pct');
   document.getElementById('ingPriceLabel').textContent = type==='pct' ? '% ต่อหน่วย' : 'ราคาต่อชิ้น ฿';
-  // ช่องปริมาณ/แพ็คยังต้องอยู่ต่อในโหมด % ด้วย เพราะเป็นที่เดียวที่ระบุ "หน่วย" ของวัตถุดิบ
-  // (แค่ไม่เอาไปหารราคา เพราะ % ไม่ต้องหาร)
-  document.getElementById('ingPurchaseQtyLabel').textContent = type==='pct' ? 'หน่วยนับ' : 'ปริมาณ/แพ็ค';
-  document.getElementById('ingPurchaseQty').placeholder = type==='pct' ? 'เช่น ชิ้น' : 'เช่น 1000 กรัม';
+  document.getElementById('ingPurchaseQtyGroup').style.display = type==='pct' ? 'none' : '';
   document.getElementById('ingUnitPriceCalcRow').style.display = type==='pct' ? 'none' : '';
   updateIngUnitPriceCalc();
 }
@@ -2108,9 +2128,9 @@ function setIngPriceType(type) {
 function updateIngUnitPriceCalc(){
   if(ingPriceTypeSel==='pct') return;
   const price = parseFloat(document.getElementById('ingPrice').value)||0;
-  const { qty, unit } = parsePackQty(document.getElementById('ingPurchaseQty').value);
+  const qty = parseFloat(document.getElementById('ingPurchaseQty').value)||0;
   const unitPrice = qty>0 ? price/qty : 0;
-  document.getElementById('ingUnitPriceCalcRow').textContent = '= ฿'+(Number.isInteger(unitPrice)?unitPrice:unitPrice.toFixed(2))+' / '+unit;
+  document.getElementById('ingUnitPriceCalcRow').textContent = '= ฿'+(Number.isInteger(unitPrice)?unitPrice:unitPrice.toFixed(2))+' / หน่วย';
 }
 
 function openIngModal(id=null){
@@ -2125,13 +2145,12 @@ function openIngModal(id=null){
       setIngPriceType(i.priceType||'thb');
       if((i.priceType||'thb')==='pct'){
         document.getElementById('ingPrice').value=i.price;
-        document.getElementById('ingPurchaseQty').value=i.unit||'';
+        document.getElementById('ingPurchaseQty').value='';
       } else {
         // วัตถุดิบเก่าที่บันทึกไว้ก่อนมีช่อง "ปริมาณ/แพ็ค" จะยังไม่มี purchasePrice/purchaseQty —
         // ให้ถือว่าซื้อมา 1 หน่วยในราคาต่อหน่วยเดิม (ไม่กระทบต้นทุนที่คำนวณไว้เดิม)
         document.getElementById('ingPrice').value = i.purchasePrice!=null ? i.purchasePrice : i.price;
-        const qty = i.purchaseQty!=null ? i.purchaseQty : 1;
-        document.getElementById('ingPurchaseQty').value = `${qty} ${i.unit||''}`.trim();
+        document.getElementById('ingPurchaseQty').value = i.purchaseQty!=null ? i.purchaseQty : 1;
       }
       updateIngUnitPriceCalc();
     }
@@ -2149,16 +2168,15 @@ function saveIng(){
   if(!name){showToast('กรุณาใส่ชื่อวัตถุดิบ','error');return;}
   const ings=DB.get('ingredients');
   const rawPrice=parseFloat(document.getElementById('ingPrice').value)||0; // ราคาต่อชิ้นที่ซื้อ (thb) หรือ % (pct)
-  const { qty:parsedQty, unit } = parsePackQty(document.getElementById('ingPurchaseQty').value);
   let unitPrice, purchasePrice=null, purchaseQty=null;
   if(ingPriceTypeSel==='pct'){
     unitPrice = rawPrice;
   } else {
-    purchaseQty = parsedQty||1;
+    purchaseQty = parseFloat(document.getElementById('ingPurchaseQty').value)||1;
     purchasePrice = rawPrice;
     unitPrice = purchaseQty>0 ? purchasePrice/purchaseQty : 0; // ← ราคาต่อหน่วยที่คำนวณอัตโนมัติ ใช้ผูกกับต้นทุนเมนู
   }
-  const item={name,unit,price:unitPrice,priceType:ingPriceTypeSel,purchasePrice,purchaseQty,stock:parseFloat(document.getElementById('ingStock').value)||0,expiry:document.getElementById('ingExpiry').value||''};
+  const item={name,price:unitPrice,priceType:ingPriceTypeSel,purchasePrice,purchaseQty,stock:parseFloat(document.getElementById('ingStock').value)||0,expiry:document.getElementById('ingExpiry').value||''};
   if(editingId){const i=ings.findIndex(x=>x.id===editingId);if(i>=0)ings[i]={...ings[i],...item};}
   else{item.id=Date.now();ings.push(item);}
   DB.set('ingredients',ings);
