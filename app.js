@@ -2052,11 +2052,51 @@ function deletePromo(id){
 }
 
 // ── INGREDIENTS ───────────────────────────────────────────────
+let ingSelectMode = false;
+let ingSelectedIds = new Set();
+
+function startIngSelectMode(){
+  ingSelectMode = true;
+  ingSelectedIds.clear();
+  document.getElementById('ingToolbarNormal').style.display = 'none';
+  document.getElementById('ingToolbarSelect').style.display = 'flex';
+  document.getElementById('ingSelectTh').style.display = '';
+  updateIngSelectCount();
+  renderIngTable();
+}
+
+function cancelIngSelectMode(){
+  ingSelectMode = false;
+  ingSelectedIds.clear();
+  document.getElementById('ingToolbarNormal').style.display = 'flex';
+  document.getElementById('ingToolbarSelect').style.display = 'none';
+  document.getElementById('ingSelectTh').style.display = 'none';
+  renderIngTable();
+}
+
+function ingSelectAll(){
+  const ings = applySortOption(DB.get('ingredients'), document.getElementById('ingSort')?.value, 'name', 'id');
+  ings.forEach(i => ingSelectedIds.add(i.id));
+  updateIngSelectCount();
+  renderIngTable();
+}
+
+function toggleIngSelect(id){
+  if(ingSelectedIds.has(id)) ingSelectedIds.delete(id);
+  else ingSelectedIds.add(id);
+  updateIngSelectCount();
+}
+
+function updateIngSelectCount(){
+  const el = document.getElementById('ingSelectCount');
+  if(el) el.textContent = `เลือกแล้ว ${ingSelectedIds.size} รายการ`;
+}
+
 function renderIngTable(){
   let ings=DB.get('ingredients');
   ings = applySortOption(ings, document.getElementById('ingSort')?.value, 'name', 'id');
   const tbody=document.getElementById('ingTable');
-  if(!ings.length){tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีวัตถุดิบ</td></tr>`;return;}
+  if(!ings.length){tbody.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีวัตถุดิบ</td></tr>`;return;}
   const now=new Date();
   tbody.innerHTML=ings.map(i=>{
     const exp=i.expiry?new Date(i.expiry):null;
@@ -2066,7 +2106,9 @@ function renderIngTable(){
     else if(daysLeft!==null&&daysLeft<=7){status='pill-gold';statusTxt='ใกล้หมด '+(daysLeft)+'วัน';}
     const priceLabel = i.priceType==='pct' ? `${i.price}%${i.unit?'/'+i.unit:''}` : `฿${Number.isInteger(i.price)?i.price:i.price.toFixed(2)}${i.unit?'/'+i.unit:''}`;
     const priceSub = (i.priceType!=='pct' && i.purchasePrice!=null && i.purchaseQty) ? `<div style="font-size:0.7rem;color:var(--muted);">฿${i.purchasePrice}/${i.purchaseQty}${i.unit?(' '+i.unit):''}</div>` : '';
+    const checkCell = ingSelectMode ? `<td><input type="checkbox" style="accent-color:var(--caramel);width:18px;height:18px;" ${ingSelectedIds.has(i.id)?'checked':''} onchange="toggleIngSelect(${i.id})"></td>` : '';
     return `<tr>
+      ${checkCell}
       <td style="font-weight:600;">${i.name}</td>
       <td>${i.unit||'—'}</td>
       <td>${priceLabel}${priceSub}</td>
@@ -2081,12 +2123,14 @@ function renderIngTable(){
   }).join('');
 }
 
-// ใช้ครั้งเดียว: สลับค่า "ราคาต่อชิ้น" กับ "ปริมาณ/แพ็ค" ของวัตถุดิบทุกตัว (เผื่อกรอกสลับช่องกันไว้ก่อนหน้านี้)
+// ใช้ตอนกดปุ่ม "สลับ": ค่าเริ่มต้นสลับทุกรายการที่มีข้อมูลราคา/ปริมาณ หรือถ้า onlySelected=true
+// จะสลับเฉพาะรายการที่ติ๊กเลือกไว้ในโหมด "เลือก" (สำหรับตอนที่รู้ตัวว่ามีบางรายการกรอกผิด ไม่อยากสลับทั้งหมด)
 // แล้วคำนวณราคาต่อหน่วยใหม่ + อัปเดตต้นทุนเมนูที่เกี่ยวข้องให้ตรงกัน
-function fixSwappedIngredientPricing(){
+function fixSwappedIngredientPricing(onlySelected){
   const ings = DB.get('ingredients');
-  const affected = ings.filter(i => (i.priceType||'thb')!=='pct' && i.purchasePrice!=null && i.purchaseQty!=null);
-  if(!affected.length){ showToast('ไม่พบวัตถุดิบที่มีข้อมูลราคา/ปริมาณให้สลับ', 'error'); return; }
+  let affected = ings.filter(i => (i.priceType||'thb')!=='pct' && i.purchasePrice!=null && i.purchaseQty!=null);
+  if(onlySelected) affected = affected.filter(i => ingSelectedIds.has(i.id));
+  if(!affected.length){ showToast(onlySelected ? 'ยังไม่ได้เลือกวัตถุดิบที่จะสลับ' : 'ไม่พบวัตถุดิบที่มีข้อมูลราคา/ปริมาณให้สลับ', 'error'); return; }
   if(!confirm(`จะสลับค่า "ราคาต่อชิ้น" กับ "ปริมาณ/แพ็ค" ของวัตถุดิบ ${affected.length} รายการ แล้วคำนวณราคาต่อหน่วยใหม่ทั้งหมด ต้องการดำเนินการต่อหรือไม่?`)) return;
   affected.forEach(i => {
     const oldPrice = i.purchasePrice, oldQty = i.purchaseQty;
@@ -2108,7 +2152,7 @@ function fixSwappedIngredientPricing(){
     }
   });
   if(updated) DB.set('menus',menus);
-  renderIngTable();
+  if(ingSelectMode) cancelIngSelectMode(); else renderIngTable();
   showToast(`✅ สลับค่าให้แล้ว ${affected.length} รายการ`, 'success');
 }
 

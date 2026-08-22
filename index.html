@@ -1153,13 +1153,21 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
             <option value="date_desc">เพิ่มล่าสุดก่อน</option>
             <option value="date_asc">เพิ่มก่อนสุดก่อน</option>
           </select>
-          <button class="btn btn-primary" onclick="openIngModal()">+ เพิ่มวัตถุดิบ</button>
-          <button class="btn btn-ghost" onclick="fixSwappedIngredientPricing()" title="ใช้ครั้งเดียวถ้าเผลอกรอกราคากับปริมาณสลับช่องกันตอนก่อนหน้านี้">🔀 สลับราคา/ปริมาณที่กรอกผิด</button>
+          <div id="ingToolbarNormal" style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="openIngModal()">+ เพิ่มวัตถุดิบ</button>
+            <button class="btn btn-ghost" onclick="startIngSelectMode()">☑️ เลือก</button>
+          </div>
+          <div id="ingToolbarSelect" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;">
+            <span style="font-size:0.82rem;color:var(--muted);" id="ingSelectCount">เลือกแล้ว 0 รายการ</span>
+            <button class="btn btn-ghost" onclick="ingSelectAll()">เลือกทั้งหมด</button>
+            <button class="btn btn-ghost" onclick="cancelIngSelectMode()">ยกเลิก</button>
+            <button class="btn btn-primary" onclick="fixSwappedIngredientPricing(true)" title="สลับราคา/ปริมาณเฉพาะรายการที่เลือก">🔀 สลับที่เลือก</button>
+          </div>
         </div>
         <div class="card">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>ชื่อวัตถุดิบ</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>คงเหลือ</th><th>วันหมดอายุ</th><th>สถานะ</th><th></th></tr></thead>
+              <thead><tr><th id="ingSelectTh" style="display:none;width:36px;"></th><th>ชื่อวัตถุดิบ</th><th>หน่วย</th><th>ราคา/หน่วย</th><th>คงเหลือ</th><th>วันหมดอายุ</th><th>สถานะ</th><th></th></tr></thead>
               <tbody id="ingTable"></tbody>
             </table>
           </div>
