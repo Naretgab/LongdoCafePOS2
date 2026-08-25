@@ -744,6 +744,12 @@ function openPayment() {
     refGroup.style.display = 'none';
     refInput.value = '';
   }
+  // GP %: ดึงค่าเริ่มต้นจากหน้าตั้งค่าตามช่องทาง แต่แก้ไขได้ต่อออเดอร์ (บางช่วง GP มีมากกว่า 1 ค่า)
+  const gp = DB.get('gpSettings', {instore:0, grab:32.1, lineman:32.1});
+  const defaultGp = gp[posType] ?? 0;
+  const gpPctInput = document.getElementById('payGpPct');
+  gpPctInput.value = (editingOrderId && editingOrderOriginal && editingOrderOriginal.gpPct!=null) ? editingOrderOriginal.gpPct : defaultGp;
+  document.getElementById('payGpDefaultNote').textContent = `(ค่าเริ่มต้นจากตั้งค่า: ${defaultGp}%)`;
   // Default order date/time to now (or the original sale time when editing); editable for backdating.
   const dtInput = document.getElementById('orderDateTime');
   if(dtInput) {
@@ -923,6 +929,8 @@ function confirmPayment() {
   const promoId = document.getElementById('cartPromoSel')?.value||null;
 
   const orderDT = getOrderDateTime();
+  const gpPct = parseFloat(document.getElementById('payGpPct').value)||0;
+  const gpAmount = Math.round(total*gpPct/100*100)/100;
   const order = {
     id: seq, orderNo: String(seq).padStart(7,'0'),
     date: formatYMD(orderDT), time: orderDT.toLocaleTimeString('th-TH'),
@@ -930,6 +938,7 @@ function confirmPayment() {
     customer: cartCustomer?{id:cartCustomer.id,name:cartCustomer.name}:null,
     items: cart.map(i=>({id:i.menuId,name:i.name,icon:i.icon,qty:i.qty,price:i.price,total:i.total,cost:i.cost,addons:i.addons||[],note:i.note||'',customPrice:i.customPrice??null,itemDiscount:i.itemDiscount||0,itemDiscountType:i.itemDiscountType||'thb'})),
     subtotal, discount:disc, total, cost, profit:total-cost,
+    gpPct, gpAmount, netRevenue: total-gpAmount, // GP ที่โดนหักตอนขาย (บันทึกติดออเดอร์ ไม่ใช้ค่าตั้งค่าปัจจุบันย้อนหลัง)
     payMethod, promoId, status:'completed',
     received: payMethod==='cash'?(parseFloat(document.getElementById('receivedAmount').value)||total):total,
     change: payMethod==='cash'?Math.max(0,(parseFloat(document.getElementById('receivedAmount').value)||0)-total):0
@@ -973,6 +982,8 @@ function saveEditedOrder(total) {
   const disc = getCartDiscount();
   const cost = cart.reduce((s,i)=>s+(i.cost*i.qty),0);
   const orderDT = getOrderDateTime();
+  const gpPct = parseFloat(document.getElementById('payGpPct').value)||0;
+  const gpAmount = Math.round(total*gpPct/100*100)/100;
 
   const updated = {
     ...original,
@@ -981,6 +992,7 @@ function saveEditedOrder(total) {
     customer: cartCustomer?{id:cartCustomer.id,name:cartCustomer.name}:null,
     items: cart.map(i=>({id:i.menuId,name:i.name,icon:i.icon,qty:i.qty,price:i.price,total:i.total,cost:i.cost,addons:i.addons||[],note:i.note||'',customPrice:i.customPrice??null,itemDiscount:i.itemDiscount||0,itemDiscountType:i.itemDiscountType||'thb'})),
     subtotal, discount:disc, total, cost, profit:total-cost,
+    gpPct, gpAmount, netRevenue: total-gpAmount,
     payMethod,
     received: payMethod==='cash'?(parseFloat(document.getElementById('receivedAmount').value)||total):total,
     change: payMethod==='cash'?Math.max(0,(parseFloat(document.getElementById('receivedAmount').value)||0)-total):0
@@ -1419,7 +1431,7 @@ function editOrder(id) {
   if(order.status==='cancelled') { showToast('ไม่สามารถแก้ไขออเดอร์ที่ยกเลิกแล้วได้','error'); return; }
 
   editingOrderId = id;
-  editingOrderOriginal = {date:order.date, time:order.time, customerId:order.customer?.id||null, total:order.total};
+  editingOrderOriginal = {date:order.date, time:order.time, customerId:order.customer?.id||null, total:order.total, gpPct:order.gpPct};
 
   cart = order.items.map(i=>({
     menuId:i.id, name:i.name, icon:i.icon, price:i.price, qty:i.qty, total:i.total, cost:i.cost||0,
@@ -2897,24 +2909,76 @@ function renderExpByCat(expenses){
   </tr>`).join('');
 }
 
+// GP ที่โดนหักสำหรับ order หนึ่งใบ: ใช้ค่าที่บันทึกติดออเดอร์ไว้ตอนขาย ถ้าไม่มี (ออเดอร์เก่าก่อนมีฟีเจอร์นี้)
+// ให้ประมาณจาก % GP ปัจจุบันในหน้าตั้งค่าตามช่องทางแทน
+function getOrderGpAmount(o, gp) {
+  if(o.gpAmount!=null) return o.gpAmount;
+  const pct = gp[o.type] ?? 0;
+  return Math.round(o.total*pct/100*100)/100;
+}
+
 function renderProfitReport(){
   const period = reportPeriod.profit||'day';
   const refKey = syncProfitPickers(period);
   const orders = getFilteredOrders(period, refKey);
+  const gp = DB.get('gpSettings', {instore:0, grab:32.1, lineman:32.1});
+
+  const channels = ['instore','grab','lineman'];
+  const channelLabel = {instore:'🏠 หน้าร้าน', grab:'🛵 Grab', lineman:'📗 LINE MAN'};
+  const byChannel = {};
+  channels.forEach(ch=>{ byChannel[ch] = {revenue:0, gpAmount:0, cost:0, estimated:false}; });
+
+  orders.forEach(o=>{
+    const ch = channels.includes(o.type) ? o.type : 'instore';
+    const c = byChannel[ch];
+    const gpAmt = getOrderGpAmount(o, gp);
+    if(o.gpAmount==null && gpAmt>0) c.estimated = true;
+    c.revenue += o.total;
+    c.gpAmount += gpAmt;
+    c.cost += (o.cost||0);
+  });
+
   const revenue = orders.reduce((s,o)=>s+o.total,0);
   const cost = orders.reduce((s,o)=>s+(o.cost||0),0);
-  const profit = revenue-cost;
-  const gpPct = revenue>0?Math.round(profit/revenue*100):0;
+  const gpAmountTotal = channels.reduce((s,ch)=>s+byChannel[ch].gpAmount,0);
+  const netRevenueTotal = revenue - gpAmountTotal;
+  const profit = netRevenueTotal-cost; // กำไรขั้นต้นหลังหัก GP แล้ว
+  const gpPctOfRevenue = revenue>0?Math.round(profit/revenue*100):0;
   const expenses = DB.get('expenses').filter(e=>dateMatchesPeriod(e.date, period, refKey));
   const expTotal = expenses.reduce((s,e)=>s+e.amount,0);
   const netProfit = profit-expTotal;
+  const anyEstimated = channels.some(ch=>byChannel[ch].estimated);
 
   document.getElementById('profitStatCards').innerHTML = `
     <div class="stat-card"><div class="stat-label">รายได้รวม</div><div class="stat-value">฿${revenue.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ต้นทุนสินค้า</div><div class="stat-value red">฿${cost.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="stat-label">กำไรขั้นต้น</div><div class="stat-value ${profit>=0?'green':'red'}">฿${profit.toLocaleString()} (${gpPct}%)</div></div>
+    <div class="stat-card"><div class="stat-label">กำไรขั้นต้น (หลังหัก GP)</div><div class="stat-value ${profit>=0?'green':'red'}">฿${profit.toLocaleString()} (${gpPctOfRevenue}%)</div></div>
     <div class="stat-card"><div class="stat-label">กำไรสุทธิ</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
+
+  const chTbody = document.getElementById('profitChannelTable');
+  const chRows = channels.map(ch=>{
+    const c = byChannel[ch];
+    const net = c.revenue - c.gpAmount;
+    const chProfit = net - c.cost;
+    const chPct = c.revenue>0 ? Math.round(chProfit/c.revenue*100) : 0;
+    return {ch, ...c, net, chProfit, chPct};
+  }).filter(r=>r.revenue>0);
+  if(!chRows.length){
+    chTbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
+  } else {
+    chTbody.innerHTML = chRows.map(r=>`<tr>
+      <td style="font-weight:600;">${channelLabel[r.ch]}${r.estimated?' <span class="pill pill-gold" style="font-size:0.65rem;">ประมาณการ</span>':''}</td>
+      <td>฿${r.revenue.toLocaleString()}</td>
+      <td style="color:var(--red);">฿${r.gpAmount.toLocaleString()}</td>
+      <td>฿${r.net.toLocaleString()}</td>
+      <td style="color:var(--red);">฿${r.cost.toLocaleString()}</td>
+      <td style="font-weight:700;color:${r.chProfit>=0?'var(--sage)':'var(--red)'};">฿${r.chProfit.toLocaleString()}</td>
+      <td><span class="pill ${r.chPct>=30?'pill-green':r.chPct>=10?'pill-gold':'pill-red'}">${r.chPct}%</span></td>
+    </tr>`).join('');
+  }
+  document.getElementById('profitGpEstimateNote').style.display = anyEstimated ? '' : 'none';
 
   // Per-product profit
   const menus = DB.get('menus');

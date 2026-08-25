@@ -35,6 +35,7 @@ const SyncEngine = (() => {
       subtotal: o.subtotal, discount: o.discount, total: o.total, cost: o.cost,
       profit: o.profit, pay_method: o.payMethod, promo_id: o.promoId ?? null,
       status: o.status, received: o.received, change: o.change,
+      gp_pct: o.gpPct ?? null, gp_amount: o.gpAmount ?? null, net_revenue: o.netRevenue ?? null,
       updated_at: new Date().toISOString(),
     };
   }
@@ -45,6 +46,7 @@ const SyncEngine = (() => {
       items: r.items || [], subtotal: r.subtotal, discount: r.discount, total: r.total,
       cost: r.cost, profit: r.profit, payMethod: r.pay_method, promoId: r.promo_id,
       status: r.status, received: r.received, change: r.change,
+      gpPct: r.gp_pct, gpAmount: r.gp_amount, netRevenue: r.net_revenue,
     };
   }
   function customerToRow(c) {

@@ -1305,6 +1305,14 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         </div>
         <div class="grid-4" id="profitStatCards"></div>
         <div class="card" style="margin-top:16px;">
+          <div class="card-header"><div class="card-title">กำไรแยกตามช่องทาง</div></div>
+          <div class="table-wrap">
+            <table><thead><tr><th>ช่องทาง</th><th>ยอดขาย</th><th>หัก GP</th><th>ยอดสุทธิ</th><th>ต้นทุนวัตถุดิบ</th><th>กำไรขั้นต้น</th><th>%กำไร</th></tr></thead>
+            <tbody id="profitChannelTable"></tbody></table>
+          </div>
+          <div id="profitGpEstimateNote" style="font-size:0.75rem;color:var(--muted);padding:8px 16px;display:none;">* ออเดอร์เก่าบางรายการไม่มีข้อมูล GP ที่ใช้จริงตอนขาย ระบบใช้ % GP ปัจจุบันจากหน้าตั้งค่าแทน (ประมาณการ)</div>
+        </div>
+        <div class="card" style="margin-top:16px;">
           <div class="card-header"><div class="card-title">กำไรแต่ละสินค้า</div></div>
           <div class="table-wrap">
             <table><thead><tr><th>เมนู</th><th>ขาย</th><th>ต้นทุน/ชิ้น</th><th>ราคาขาย</th><th>กำไร/ชิ้น</th><th>GP%</th><th>จำนวนขาย</th><th>กำไรรวม</th></tr></thead>
@@ -1466,6 +1474,10 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         <div class="form-group" id="refOrderNoGroup" style="display:none;">
           <div class="form-label" id="refOrderNoLabel">หมายเลขออเดอร์</div>
           <input class="form-control note-input" id="refOrderNo" placeholder="กรอกหมายเลขออเดอร์จากแอป" oninput="buildReceiptPreview()">
+        </div>
+        <div class="form-group" id="payGpGroup">
+          <div class="form-label">ค่า GP ที่หัก (%) <span style="font-weight:400;color:var(--muted);" id="payGpDefaultNote"></span></div>
+          <input class="form-control" type="number" step="0.01" id="payGpPct" oninput="buildReceiptPreview()">
         </div>
         <div class="form-group">
           <div class="form-label">วันเวลาออเดอร์ <span style="font-weight:400;color:var(--muted);">(ค่าเริ่มต้น: ตอนนี้ แก้ไขได้ถ้าต้องการบันทึกย้อนหลัง)</span></div>
