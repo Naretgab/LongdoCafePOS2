@@ -2569,10 +2569,11 @@ function renderSalesReport(){
   const period = reportPeriod.sales||'day';
   const refKey = syncSalesPickers(period);
   const orders = getFilteredOrders(period, refKey);
+  const gp = DB.get('gpSettings', {instore:0, grab:32.1, lineman:32.1});
   const total = orders.reduce((s,o)=>s+o.total,0);
   const totalDisc = orders.reduce((s,o)=>s+(o.discount||0),0);
-  const cost = orders.reduce((s,o)=>s+(o.cost||0),0);
-  const profit = orders.reduce((s,o)=>s+(o.profit||0),0);
+  const gpAmountTotal = orders.reduce((s,o)=>s+getOrderGpAmount(o,gp),0);
+  const netAfterGp = total-gpAmountTotal;
   const expenses = DB.get('expenses').filter(e=>dateMatchesPeriod(e.date, period, refKey));
   const expTotal = expenses.reduce((s,e)=>s+e.amount,0);
 
@@ -2580,6 +2581,8 @@ function renderSalesReport(){
     <div class="stat-card"><div class="stat-label">ยอดขายรวม</div><div class="stat-value">฿${total.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">จำนวนออเดอร์</div><div class="stat-value">${orders.length}</div></div>
     <div class="stat-card"><div class="stat-label">ส่วนลดรวม</div><div class="stat-value red">฿${totalDisc.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังหัก GP)</div><div class="stat-value">฿${netAfterGp.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">รายจ่าย</div><div class="stat-value red">฿${expTotal.toLocaleString()}</div></div>
   `;
 
@@ -2592,8 +2595,11 @@ function renderSalesReport(){
 
   // Table
   const tbody=document.getElementById('salesReportTable');
-  if(!orders.length){tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;return;}
-  tbody.innerHTML=orders.slice().reverse().map(o=>`<tr>
+  if(!orders.length){tbody.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;return;}
+  tbody.innerHTML=orders.slice().reverse().map(o=>{
+    const gpAmt = getOrderGpAmount(o,gp);
+    const estimated = o.gpAmount==null && gpAmt>0;
+    return `<tr>
     <td style="font-family:monospace;">#${o.orderNo}</td>
     <td>${o.date} ${o.time}</td>
     <td>${o.customer?.name||'—'}</td>
@@ -2601,7 +2607,9 @@ function renderSalesReport(){
     <td>฿${o.subtotal}</td>
     <td style="color:var(--red);">${o.discount>0?'-฿'+o.discount:'—'}</td>
     <td style="font-weight:600;">฿${o.total}</td>
-  </tr>`).join('');
+    <td style="color:var(--red);">${gpAmt>0?'-฿'+gpAmt.toLocaleString()+(estimated?' <span class="pill pill-gold" style="font-size:0.6rem;">ประมาณ</span>':''):'—'}</td>
+    <td style="font-weight:600;">฿${(o.total-gpAmt).toLocaleString()}</td>
+  </tr>`;}).join('');
 }
 
 function renderSalesChart(orders, period, refKey) {
@@ -2922,27 +2930,41 @@ function renderProfitReport(){
   const refKey = syncProfitPickers(period);
   const orders = getFilteredOrders(period, refKey);
   const gp = DB.get('gpSettings', {instore:0, grab:32.1, lineman:32.1});
+  const menus = DB.get('menus');
+  const menuMap = new Map(menus.map(m=>[m.id,m]));
+  // ใช้ต้นทุนวัตถุดิบ "ปัจจุบัน" ของเมนู (อัปเดตอัตโนมัติทุกครั้งที่แก้ราคาวัตถุดิบ)
+  // แทนต้นทุนที่บันทึกแช่แข็งไว้ตอนขาย เพื่อให้เห็นกำไรที่แท้จริง ณ ตอนนี้
+  // ถ้าเมนูถูกลบไปแล้วค่อย fallback ไปใช้ต้นทุนที่บันทึกไว้ตอนขายแทน
+  function currentItemCost(item){
+    const m = menuMap.get(item.id);
+    return m ? (m.cost||0) : (item.cost||0);
+  }
+  function currentOrderCost(o){
+    return o.items.reduce((s,i)=>s+currentItemCost(i)*i.qty,0);
+  }
 
   const channels = ['instore','grab','lineman'];
   const channelLabel = {instore:'🏠 หน้าร้าน', grab:'🛵 Grab', lineman:'📗 LINE MAN'};
   const byChannel = {};
   channels.forEach(ch=>{ byChannel[ch] = {revenue:0, gpAmount:0, cost:0, estimated:false}; });
 
+  let cost = 0;
   orders.forEach(o=>{
     const ch = channels.includes(o.type) ? o.type : 'instore';
     const c = byChannel[ch];
     const gpAmt = getOrderGpAmount(o, gp);
     if(o.gpAmount==null && gpAmt>0) c.estimated = true;
+    const oCost = currentOrderCost(o);
     c.revenue += o.total;
     c.gpAmount += gpAmt;
-    c.cost += (o.cost||0);
+    c.cost += oCost;
+    cost += oCost;
   });
 
   const revenue = orders.reduce((s,o)=>s+o.total,0);
-  const cost = orders.reduce((s,o)=>s+(o.cost||0),0);
   const gpAmountTotal = channels.reduce((s,ch)=>s+byChannel[ch].gpAmount,0);
   const netRevenueTotal = revenue - gpAmountTotal;
-  const profit = netRevenueTotal-cost; // กำไรขั้นต้นหลังหัก GP แล้ว
+  const profit = netRevenueTotal-cost; // กำไรขั้นต้นหลังหัก GP แล้ว (ต้นทุนคำนวณจากราคาวัตถุดิบปัจจุบัน)
   const gpPctOfRevenue = revenue>0?Math.round(profit/revenue*100):0;
   const expenses = DB.get('expenses').filter(e=>dateMatchesPeriod(e.date, period, refKey));
   const expTotal = expenses.reduce((s,e)=>s+e.amount,0);
@@ -2952,7 +2974,7 @@ function renderProfitReport(){
   document.getElementById('profitStatCards').innerHTML = `
     <div class="stat-card"><div class="stat-label">รายได้รวม</div><div class="stat-value">฿${revenue.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="stat-label">ต้นทุนสินค้า</div><div class="stat-value red">฿${cost.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ต้นทุนสินค้า <span style="font-weight:400;font-size:0.7rem;">(ราคาวัตถุดิบล่าสุด)</span></div><div class="stat-value red">฿${cost.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">กำไรขั้นต้น (หลังหัก GP)</div><div class="stat-value ${profit>=0?'green':'red'}">฿${profit.toLocaleString()} (${gpPctOfRevenue}%)</div></div>
     <div class="stat-card"><div class="stat-label">กำไรสุทธิ</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
@@ -2980,14 +3002,13 @@ function renderProfitReport(){
   }
   document.getElementById('profitGpEstimateNote').style.display = anyEstimated ? '' : 'none';
 
-  // Per-product profit
-  const menus = DB.get('menus');
+  // Per-product profit (ต้นทุนต่อชิ้นก็ใช้ราคาวัตถุดิบปัจจุบันเช่นกัน)
   const itemSales = {};
   orders.forEach(o=>o.items.forEach(i=>{
     if(!itemSales[i.id])itemSales[i.id]={name:i.name,qty:0,revenue:0,cost:0};
     itemSales[i.id].qty+=i.qty;
     itemSales[i.id].revenue+=i.total;
-    itemSales[i.id].cost+=(i.cost||0)*i.qty;
+    itemSales[i.id].cost+=currentItemCost(i)*i.qty;
   }));
 
   const tbody=document.getElementById('profitTable');
