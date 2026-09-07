@@ -1296,6 +1296,7 @@ function filterOrdersByType(type) {
 function renderOrdersTable() {
   renderOrdersTypeTabs();
   const sortVal = document.getElementById('ordersSort')?.value || 'date_desc';
+  const gp = DB.get('gpSettings', {instore:0, grab:32.1, lineman:32.1});
   // Sort by the date/time actually recorded on the sale (not insertion order), so backdated
   // or edited orders land in the right place.
   const orders = DB.get('orders').slice().sort((a,b)=>{
@@ -1306,9 +1307,13 @@ function renderOrdersTable() {
   const date = document.getElementById('ordersDate')?.value||'';
   let filtered = date ? orders.filter(o=>o.date===date) : orders;
   if(ordersTypeFilter!=='all') filtered = filtered.filter(o=>o.type===ordersTypeFilter);
-  if(!filtered.length) { tbody.innerHTML=`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px;">ไม่มีรายการ</td></tr>`; return; }
+  if(!filtered.length) { tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px;">ไม่มีรายการ</td></tr>`; return; }
 
-  const rowHtml = (o,n) => `<tr>
+  const rowHtml = (o,n) => {
+    const gpAmt = getOrderGpAmount(o,gp);
+    const gpPct = o.gpPct ?? gp[o.type] ?? 0;
+    const estimated = o.gpAmount==null && gpAmt>0;
+    return `<tr>
       <td>${n}</td>
       <td style="font-family:monospace;font-weight:600;">#${o.orderNo}</td>
       <td>${o.date} ${o.time}</td>
@@ -1316,12 +1321,14 @@ function renderOrdersTable() {
       <td><span class="pill ${o.type==='grab'?'pill-green':o.type==='lineman'?'pill-gold':'pill-blue'}">${o.type==='grab'?'Grab':o.type==='lineman'?'LINE MAN':'หน้าร้าน'}</span>${o.refNo?`<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:2px;">#${o.refNo}</div>`:''}</td>
       <td>${o.items.reduce((s,i)=>s+(i.qty||1),0)} รายการ</td>
       <td style="font-weight:600;">฿${o.total}</td>
+      <td style="color:var(--red);">${gpAmt>0?'-฿'+gpAmt.toLocaleString()+' ('+gpPct+'%)'+(estimated?' <span class="pill pill-gold" style="font-size:0.6rem;">ประมาณ</span>':''):'—'}</td>
       <td><span class="pill ${o.status==='cancelled'?'pill-red':'pill-green'}">${o.status==='cancelled'?'ยกเลิก':'สำเร็จ'}</span></td>
       <td style="display:flex;gap:6px;">
         <button class="btn btn-ghost btn-sm" onclick="viewOrder(${o.id})">ดู</button>
         <button class="btn btn-ghost btn-sm" ${o.status==='cancelled'?'disabled':''} onclick="editOrder(${o.id})">✏️ แก้ไข</button>
       </td>
     </tr>`;
+  };
 
   // Sorting by customer name doesn't fit the day-grouped view (orders from the same
   // customer can span many days), so show a flat, numbered list instead.
@@ -1348,7 +1355,7 @@ function renderOrdersTable() {
   tbody.innerHTML = groups.map(g=>{
     const dayTotal = g.orders.reduce((s,o)=>s+(o.status==='cancelled'?0:o.total),0);
     const header = `<tr>
-      <td colspan="9" style="background:var(--foam);font-weight:700;padding:8px 10px;">
+      <td colspan="10" style="background:var(--foam);font-weight:700;padding:8px 10px;">
         📅 ${g.date} <span style="font-weight:400;color:var(--muted);margin-left:8px;">${g.orders.length} ออเดอร์</span>
         <span style="float:right;color:var(--sage);">รวม ฿${dayTotal.toLocaleString()}</span>
       </td>
@@ -1370,6 +1377,9 @@ function viewOrder(id) {
   if(!order) return;
   selectedOrderId = id;
   const shopInfo = DB.get('shopInfo',{});
+  const gp = DB.get('gpSettings', {instore:0, grab:32.1, lineman:32.1});
+  const gpAmt = getOrderGpAmount(order, gp);
+  const gpEstimated = order.gpAmount==null && gpAmt>0;
   document.getElementById('orderDetailContent').innerHTML = `
     <div class="grid-2" style="gap:16px;margin-bottom:16px;">
       <div>
@@ -1388,6 +1398,14 @@ function viewOrder(id) {
         <div style="font-size:0.82rem;color:var(--muted);">ประเภท</div>
         <div>${order.type==='grab'?'Grab':order.type==='lineman'?'LINE MAN':'หน้าร้าน'}${order.refNo?` · เลขที่ #${order.refNo}`:''}</div>
       </div>
+      ${gpAmt>0?`<div>
+        <div style="font-size:0.82rem;color:var(--muted);">หัก GP</div>
+        <div style="color:var(--red);font-weight:600;">-฿${gpAmt.toLocaleString()} (${(order.gpPct??gp[order.type]??0)}%)${gpEstimated?' <span class="pill pill-gold" style="font-size:0.6rem;">ประมาณ</span>':''}</div>
+      </div>
+      <div>
+        <div style="font-size:0.82rem;color:var(--muted);">ร้านได้รับจริง</div>
+        <div style="font-weight:600;">฿${(order.total-gpAmt).toLocaleString()}</div>
+      </div>`:''}
     </div>
     <div class="receipt">
       ${imageCache.shopLogo?`<div style="text-align:center;margin-bottom:6px;"><img src="${imageCache.shopLogo}" style="max-width:100px;max-height:50px;object-fit:contain;"></div>`:''}
@@ -2598,6 +2616,7 @@ function renderSalesReport(){
   if(!orders.length){tbody.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;return;}
   tbody.innerHTML=orders.slice().reverse().map(o=>{
     const gpAmt = getOrderGpAmount(o,gp);
+    const gpPct = o.gpPct ?? gp[o.type] ?? 0;
     const estimated = o.gpAmount==null && gpAmt>0;
     return `<tr>
     <td style="font-family:monospace;">#${o.orderNo}</td>
@@ -2607,7 +2626,7 @@ function renderSalesReport(){
     <td>฿${o.subtotal}</td>
     <td style="color:var(--red);">${o.discount>0?'-฿'+o.discount:'—'}</td>
     <td style="font-weight:600;">฿${o.total}</td>
-    <td style="color:var(--red);">${gpAmt>0?'-฿'+gpAmt.toLocaleString()+(estimated?' <span class="pill pill-gold" style="font-size:0.6rem;">ประมาณ</span>':''):'—'}</td>
+    <td style="color:var(--red);">${gpAmt>0?'-฿'+gpAmt.toLocaleString()+' ('+gpPct+'%)'+(estimated?' <span class="pill pill-gold" style="font-size:0.6rem;">ประมาณ</span>':''):'—'}</td>
     <td style="font-weight:600;">฿${(o.total-gpAmt).toLocaleString()}</td>
   </tr>`;}).join('');
 }
