@@ -2588,12 +2588,19 @@ function renderSalesReport(){
   const refKey = syncSalesPickers(period);
   const orders = getFilteredOrders(period, refKey);
   const gp = DB.get('gpSettings', {instore:0, grab:32.1, lineman:32.1});
+  const menuMap = new Map(DB.get('menus').map(m=>[m.id,m]));
   const total = orders.reduce((s,o)=>s+o.total,0);
   const totalDisc = orders.reduce((s,o)=>s+(o.discount||0),0);
   const gpAmountTotal = orders.reduce((s,o)=>s+getOrderGpAmount(o,gp),0);
   const netAfterGp = total-gpAmountTotal;
+  // ต้นทุนใช้ราคาวัตถุดิบปัจจุบัน (เหมือนหน้ากำไรขาดทุน) เพื่อให้กำไรสุทธิตรงกันทั้งสองหน้า
+  const cost = orders.reduce((s,o)=>s+o.items.reduce((s2,i)=>{
+    const m = menuMap.get(i.id);
+    return s2+(m?(m.cost||0):(i.cost||0))*i.qty;
+  },0),0);
   const expenses = DB.get('expenses').filter(e=>dateMatchesPeriod(e.date, period, refKey));
   const expTotal = expenses.reduce((s,e)=>s+e.amount,0);
+  const netProfit = netAfterGp-cost-expTotal;
 
   document.getElementById('salesStatCards').innerHTML = `
     <div class="stat-card"><div class="stat-label">ยอดขายรวม</div><div class="stat-value">฿${total.toLocaleString()}</div></div>
@@ -2602,6 +2609,7 @@ function renderSalesReport(){
     <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังหัก GP)</div><div class="stat-value">฿${netAfterGp.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">รายจ่าย</div><div class="stat-value red">฿${expTotal.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">กำไรสุทธิ (หลังหักรายจ่าย)</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
 
   // Simple chart
@@ -2995,7 +3003,8 @@ function renderProfitReport(){
     <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ต้นทุนสินค้า <span style="font-weight:400;font-size:0.7rem;">(ราคาวัตถุดิบล่าสุด)</span></div><div class="stat-value red">฿${cost.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">กำไรขั้นต้น (หลังหัก GP)</div><div class="stat-value ${profit>=0?'green':'red'}">฿${profit.toLocaleString()} (${gpPctOfRevenue}%)</div></div>
-    <div class="stat-card"><div class="stat-label">กำไรสุทธิ</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ยอดรายจ่าย</div><div class="stat-value red">฿${expTotal.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">กำไรสุทธิ (หลังหักรายจ่าย)</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
 
   const chTbody = document.getElementById('profitChannelTable');
