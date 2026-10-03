@@ -976,11 +976,11 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 
           <!-- Cart footer — always visible -->
           <div class="cart-footer">
+            <!-- Promotions applied -->
+            <div id="cartPromoChips" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
             <!-- Discount row -->
             <div class="cart-discount-row">
-              <select class="form-control" style="flex:1;font-size:0.78rem;padding:6px 8px;" id="cartPromoSel" onchange="applyPromo()">
-                <option value="">🎁 โปรโมชั่น</option>
-              </select>
+              <button class="btn btn-ghost" style="flex:1;font-size:0.78rem;padding:6px 8px;" onclick="openPromoPicker()">🎁 เพิ่มโปรโมชั่น</button>
               <input class="form-control" type="number" style="width:80px;font-size:0.78rem;padding:6px 8px;" placeholder="ส่วนลด" id="cartDiscount" oninput="updateCartTotals()">
               <select class="form-control" style="width:54px;font-size:0.78rem;padding:6px 6px;" id="cartDiscountType">
                 <option value="thb">฿</option>
@@ -1274,6 +1274,14 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
               <tbody id="expByCatTable"></tbody></table>
             </div>
           </div>
+        </div>
+        <div class="card" style="margin-top:16px;">
+          <div class="card-header"><div class="card-title">ลูกค้าใหม่ / ลูกค้าเก่า</div></div>
+          <div class="table-wrap">
+            <table><thead><tr><th>ประเภทลูกค้า</th><th>จำนวนคน</th><th>สัดส่วน</th><th>ยอดขาย</th><th>เฉลี่ย/คน</th></tr></thead>
+            <tbody id="custNewOldTable"></tbody></table>
+          </div>
+          <div style="font-size:0.75rem;color:var(--muted);padding:8px 16px;">* นับเฉพาะออเดอร์ที่ระบุลูกค้า — "ลูกค้าใหม่" คือคนที่ซื้อครั้งแรกในช่วงเวลานี้ "ลูกค้าเก่า" คือคนที่เคยซื้อมาก่อนหน้านี้แล้ว</div>
         </div>
         <div class="card" style="margin-top:16px;">
           <div class="card-header"><div class="card-title">รายการออเดอร์</div></div>
@@ -1869,6 +1877,21 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     <div id="posCustList" style="max-height:300px;overflow-y:auto;"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost btn-sm" onclick="setCartCustomer(null); closeModal('selectCustModal')">ไม่ระบุ</button>
+    </div>
+  </div>
+</div>
+
+<!-- Promo Picker Modal (POS cart — select multiple promotions) -->
+<div class="modal-overlay" id="promoPickerModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">🎁 เลือกโปรโมชั่น</div>
+      <button class="modal-close" onclick="closeModal('promoPickerModal')">×</button>
+    </div>
+    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px;">เลือกได้มากกว่า 1 รายการ ระบบจะรวมส่วนลดให้อัตโนมัติ</div>
+    <div id="promoPickerList" style="max-height:340px;overflow-y:auto;"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('promoPickerModal')">เสร็จสิ้น</button>
     </div>
   </div>
 </div>

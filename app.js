@@ -82,6 +82,7 @@ function initDB() {
 let cart = [];
 let posType = 'instore'; // instore | grab | lineman
 let cartCustomer = null; // customer object or null
+let cartPromoIds = []; // array of promotion ids currently applied to the cart (supports multiple promos per order)
 let editingId = null;
 let currentPage = 'pos';
 let reportPeriod = {sales:'day', profit:'day', products:'day', expenses:'all'};
@@ -207,7 +208,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderPosCats();
   renderPosMenu();
   updateCartUI();
-  fillPromoSel();
 
   // Hide splash
   setTimeout(() => {
@@ -436,12 +436,67 @@ function updateCartUI() {
   updateCartTotals();
 }
 
-function updateCartTotals() {
-  const subtotal = cart.reduce((s,i)=>s+i.total,0);
-  let discAmt = 0;
+// ส่วนลดจากโปรโมชั่นทั้งหมดที่เลือกไว้ (แต่ละตัวคำนวณแยกจากยอดรวม แล้วรวมกัน)
+function calcPromoDiscountTotal(subtotal) {
+  const promos = DB.get('promotions');
+  return cartPromoIds.reduce((sum,pid)=>{
+    const p = promos.find(x=>x.id===pid);
+    if(!p) return sum;
+    return sum + (p.type==='pct' ? Math.round(subtotal*p.value/100) : p.value);
+  }, 0);
+}
+// ส่วนลดที่กรอกเองเพิ่มเติม (นอกเหนือจากโปรโมชั่น)
+function getManualDiscountAmt(subtotal) {
   const dval = parseFloat(document.getElementById('cartDiscount')?.value)||0;
   const dtype = document.getElementById('cartDiscountType')?.value||'thb';
-  if(dval>0) { discAmt = dtype==='pct' ? Math.round(subtotal*dval/100) : dval; }
+  return dval>0 ? (dtype==='pct' ? Math.round(subtotal*dval/100) : dval) : 0;
+}
+function renderCartPromoChips() {
+  const el = document.getElementById('cartPromoChips');
+  if(!el) return;
+  if(!cartPromoIds.length) { el.innerHTML=''; el.style.display='none'; return; }
+  const subtotal = cart.reduce((s,i)=>s+i.total,0);
+  const promos = DB.get('promotions');
+  el.style.display='flex';
+  el.innerHTML = cartPromoIds.map(pid=>{
+    const p = promos.find(x=>x.id===pid);
+    if(!p) return '';
+    const amt = p.type==='pct' ? Math.round(subtotal*p.value/100) : p.value;
+    return `<span class="pill pill-green" style="display:inline-flex;align-items:center;gap:5px;font-size:0.72rem;padding:4px 8px;">🎁 ${p.name} (-฿${amt})<button onclick="removeCartPromo(${p.id})" style="background:none;border:none;color:inherit;cursor:pointer;font-weight:700;padding:0;line-height:1;font-size:0.9rem;">×</button></span>`;
+  }).join('');
+}
+function removeCartPromo(id) {
+  cartPromoIds = cartPromoIds.filter(x=>x!==id);
+  updateCartTotals();
+}
+function togglePromoPick(id, checked) {
+  if(checked) { if(!cartPromoIds.includes(id)) cartPromoIds.push(id); }
+  else { cartPromoIds = cartPromoIds.filter(x=>x!==id); }
+  updateCartTotals();
+}
+function openPromoPicker() {
+  const promos = DB.get('promotions').filter(p=>p.active);
+  const list = document.getElementById('promoPickerList');
+  if(!promos.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px;">ยังไม่มีโปรโมชั่นที่เปิดใช้งาน</div>';
+  } else {
+    list.innerHTML = promos.map(p=>`
+      <label style="display:flex;align-items:center;gap:10px;padding:12px 4px;border-bottom:1px solid var(--border);cursor:pointer;">
+        <input type="checkbox" style="width:18px;height:18px;accent-color:var(--caramel);flex-shrink:0;" ${cartPromoIds.includes(p.id)?'checked':''} onchange="togglePromoPick(${p.id}, this.checked)">
+        <div style="flex:1;">
+          <div style="font-weight:600;">${p.name}</div>
+          <div style="font-size:0.78rem;color:var(--muted);">${p.type==='pct'?p.value+'%':'฿'+p.value}</div>
+        </div>
+      </label>`).join('');
+  }
+  openModal('promoPickerModal');
+}
+
+function updateCartTotals() {
+  const subtotal = cart.reduce((s,i)=>s+i.total,0);
+  const promoDisc = calcPromoDiscountTotal(subtotal);
+  const manualDisc = getManualDiscountAmt(subtotal);
+  const discAmt = promoDisc + manualDisc;
   const total = Math.max(0, subtotal-discAmt);
   document.getElementById('ctSubtotal').textContent = '฿'+subtotal;
   document.getElementById('ctDiscount').textContent = '-฿'+discAmt;
@@ -449,6 +504,7 @@ function updateCartTotals() {
   document.getElementById('topbarSales').textContent = '฿'+getDaySales();
   document.getElementById('payBtn').disabled = cart.length===0;
   updateCartFab(total);
+  renderCartPromoChips();
 }
 
 // Keeps the floating cart button (mobile drawer trigger) in sync with item count/total
@@ -481,9 +537,9 @@ function clearCart() {
   if(!cart.length) return;
   cart=[];
   cartCustomer=null;
+  cartPromoIds=[];
   document.getElementById('cartCustomerName').textContent='ลูกค้า';
   document.getElementById('cartDiscount').value='';
-  document.getElementById('cartPromoSel').value='';
   updateCartUI();
   toggleCartPanel(false);
 }
@@ -709,23 +765,7 @@ function setCartCustomer(id) {
   if(c) { cartCustomer=c; document.getElementById('cartCustomerName').textContent=c.name; }
 }
 
-function fillPromoSel() {
-  const sel = document.getElementById('cartPromoSel');
-  const promos = DB.get('promotions').filter(p=>p.active);
-  sel.innerHTML = '<option value="">🎁 โปรโมชั่น</option>';
-  promos.forEach(p=>{ sel.innerHTML+=`<option value="${p.id}">${p.name} (${p.type==='pct'?p.value+'%':'฿'+p.value})</option>`; });
-}
-
-function applyPromo() {
-  const pid = document.getElementById('cartPromoSel').value;
-  if(!pid) { document.getElementById('cartDiscount').value=''; document.getElementById('cartDiscountType').value='thb'; updateCartTotals(); return; }
-  const promo = DB.get('promotions').find(p=>p.id==pid);
-  if(promo) {
-    document.getElementById('cartDiscount').value = promo.value;
-    document.getElementById('cartDiscountType').value = promo.type;
-    updateCartTotals();
-  }
-}
+// (โปรโมชั่นตอนนี้เลือกได้หลายรายการผ่าน openPromoPicker() แทน dropdown เดี่ยวแบบเดิม)
 
 // ── PAYMENT ───────────────────────────────────────────────────
 function openPayment() {
@@ -793,9 +833,7 @@ function getCartTotal() {
 
 function getCartDiscount() {
   const subtotal = cart.reduce((s,i)=>s+i.total,0);
-  const dval = parseFloat(document.getElementById('cartDiscount')?.value)||0;
-  const dtype = document.getElementById('cartDiscountType')?.value||'thb';
-  return dval>0 ? (dtype==='pct' ? Math.round(subtotal*dval/100) : dval) : 0;
+  return calcPromoDiscountTotal(subtotal) + getManualDiscountAmt(subtotal);
 }
 
 let payMethod = 'cash';
@@ -926,7 +964,7 @@ function confirmPayment() {
   const subtotal = cart.reduce((s,i)=>s+i.total,0);
   const disc = getCartDiscount();
   const cost = cart.reduce((s,i)=>s+(i.cost*i.qty),0);
-  const promoId = document.getElementById('cartPromoSel')?.value||null;
+  const promoIds = [...cartPromoIds];
 
   const orderDT = getOrderDateTime();
   const gpPct = parseFloat(document.getElementById('payGpPct').value)||0;
@@ -939,7 +977,7 @@ function confirmPayment() {
     items: cart.map(i=>({id:i.menuId,name:i.name,icon:i.icon,qty:i.qty,price:i.price,total:i.total,cost:i.cost,addons:i.addons||[],note:i.note||'',customPrice:i.customPrice??null,itemDiscount:i.itemDiscount||0,itemDiscountType:i.itemDiscountType||'thb'})),
     subtotal, discount:disc, total, cost, profit:total-cost,
     gpPct, gpAmount, netRevenue: total-gpAmount, // GP ที่โดนหักตอนขาย (บันทึกติดออเดอร์ ไม่ใช้ค่าตั้งค่าปัจจุบันย้อนหลัง)
-    payMethod, promoId, status:'completed',
+    payMethod, promoIds, status:'completed',
     received: payMethod==='cash'?(parseFloat(document.getElementById('receivedAmount').value)||total):total,
     change: payMethod==='cash'?Math.max(0,(parseFloat(document.getElementById('receivedAmount').value)||0)-total):0
   };
@@ -954,11 +992,20 @@ function confirmPayment() {
     if(ci>=0) { custs[ci].total=(custs[ci].total||0)+total; custs[ci].lastOrder=order.date; DB.set('customers',custs); }
   }
 
-  // Update promo usage
-  if(promoId && disc>0) {
+  // Update usage stats for every promotion applied to this order
+  if(promoIds.length) {
     const promos = DB.get('promotions');
-    const pi = promos.findIndex(p=>p.id==promoId);
-    if(pi>=0) { promos[pi].used=(promos[pi].used||0)+1; promos[pi].totalDiscount=(promos[pi].totalDiscount||0)+disc; DB.set('promotions',promos); }
+    let changed = false;
+    promoIds.forEach(pid=>{
+      const pi = promos.findIndex(p=>p.id===pid);
+      if(pi>=0) {
+        const amt = promos[pi].type==='pct' ? Math.round(subtotal*promos[pi].value/100) : promos[pi].value;
+        promos[pi].used=(promos[pi].used||0)+1;
+        promos[pi].totalDiscount=(promos[pi].totalDiscount||0)+amt;
+        changed = true;
+      }
+    });
+    if(changed) DB.set('promotions',promos);
   }
 
   closeModal('payModal');
@@ -993,7 +1040,7 @@ function saveEditedOrder(total) {
     items: cart.map(i=>({id:i.menuId,name:i.name,icon:i.icon,qty:i.qty,price:i.price,total:i.total,cost:i.cost,addons:i.addons||[],note:i.note||'',customPrice:i.customPrice??null,itemDiscount:i.itemDiscount||0,itemDiscountType:i.itemDiscountType||'thb'})),
     subtotal, discount:disc, total, cost, profit:total-cost,
     gpPct, gpAmount, netRevenue: total-gpAmount,
-    payMethod,
+    payMethod, promoIds: [...cartPromoIds],
     received: payMethod==='cash'?(parseFloat(document.getElementById('receivedAmount').value)||total):total,
     change: payMethod==='cash'?Math.max(0,(parseFloat(document.getElementById('receivedAmount').value)||0)-total):0
   };
@@ -1459,12 +1506,17 @@ function editOrder(id) {
 
   cartCustomer = order.customer ? (DB.get('customers').find(c=>c.id===order.customer.id) || order.customer) : null;
   posType = order.type;
+  cartPromoIds = order.promoIds ? [...order.promoIds] : [];
 
   closeModal('orderDetailModal');
   showPage('pos');
   setPosType(posType);
   document.getElementById('cartCustomerName').textContent = cartCustomer ? cartCustomer.name : 'ลูกค้า';
-  document.getElementById('cartDiscount').value = order.discount>0 ? order.discount : '';
+  // ส่วนลดที่โชว์ในช่องกรอกเอง = ส่วนลดรวมเดิม หักส่วนที่มาจากโปรโมชั่นที่กู้คืนมาแล้ว (กันไม่ให้นับซ้ำ)
+  const subtotalForEdit = cart.reduce((s,i)=>s+i.total,0);
+  const promoDiscForEdit = calcPromoDiscountTotal(subtotalForEdit);
+  const leftoverDisc = Math.max(0, (order.discount||0) - promoDiscForEdit);
+  document.getElementById('cartDiscount').value = leftoverDisc>0 ? leftoverDisc : '';
   document.getElementById('cartDiscountType').value = 'thb';
   updateCartUI();
 
@@ -1840,7 +1892,6 @@ function saveMenu() {
   renderMenuTable();
   renderPosCats();
   renderPosMenu();
-  fillPromoSel();
   showToast('บันทึกเมนูแล้ว','success');
 }
 
@@ -2060,7 +2111,6 @@ function savePromo(){
   DB.set('promotions',promos);
   closeModal('promoModal');
   renderPromoTable();
-  fillPromoSel();
   showToast('บันทึกโปรโมชั่นแล้ว','success');
 }
 
@@ -2070,14 +2120,12 @@ function togglePromo(id){
   if(i>=0)promos[i].active=!promos[i].active;
   DB.set('promotions',promos);
   renderPromoTable();
-  fillPromoSel();
 }
 
 function deletePromo(id){
   if(!confirm('ลบโปรโมชั่นนี้?'))return;
   DB.set('promotions',DB.get('promotions').filter(p=>p.id!==id));
   renderPromoTable();
-  fillPromoSel();
   showToast('ลบโปรโมชั่นแล้ว');
 }
 
@@ -2617,6 +2665,7 @@ function renderSalesReport(){
   renderCompareChart(period, refKey);
   renderSalesByType(orders);
   renderSalesByCustType(orders);
+  renderCustomerAnalysis(orders, period, refKey);
   renderExpByCat(expenses);
 
   // Table
@@ -2869,6 +2918,65 @@ function renderSalesByType(orders){
 }
 
 // Breakdown of sales by customer category (user-managed list, see customerTypes DB e.g. DC, Boonrawd, VIP)
+// นับลูกค้าใหม่/เก่าในช่วงเวลาที่กำลังดูรายงานอยู่ — "ใหม่" คือคนที่ซื้อครั้งแรกในชีวิตตรงกับ
+// ช่วงเวลานี้พอดี (เทียบกับประวัติการซื้อ "ทั้งหมด" ไม่ใช่แค่ที่กรองอยู่) ส่วน "เก่า" คือเคยซื้อมาก่อนแล้ว
+function renderCustomerAnalysis(orders, period, refKey){
+  const tbody = document.getElementById('custNewOldTable');
+  if(!tbody) return;
+  const allOrders = DB.get('orders').filter(o=>o.status!=='cancelled');
+
+  // วันที่ซื้อครั้งแรกของลูกค้าแต่ละคน (จากประวัติทั้งหมด)
+  const firstOrderDate = {};
+  allOrders.forEach(o=>{
+    if(!o.customer) return;
+    const id = o.customer.id;
+    if(!firstOrderDate[id] || o.date < firstOrderDate[id]) firstOrderDate[id] = o.date;
+  });
+
+  // ลูกค้าที่มีออเดอร์อยู่ในช่วงที่กรองอยู่ตอนนี้
+  const customersInPeriod = new Map(); // id -> {sum}
+  orders.forEach(o=>{
+    if(!o.customer) return;
+    const id = o.customer.id;
+    if(!customersInPeriod.has(id)) customersInPeriod.set(id, {sum:0});
+    customersInPeriod.get(id).sum += o.total;
+  });
+
+  let newCount=0, newSum=0, oldCount=0, oldSum=0;
+  customersInPeriod.forEach((c,id)=>{
+    const isNew = dateMatchesPeriod(firstOrderDate[id], period, refKey);
+    if(isNew) { newCount++; newSum+=c.sum; } else { oldCount++; oldSum+=c.sum; }
+  });
+
+  const noCustOrders = orders.filter(o=>!o.customer);
+  const noCustSum = noCustOrders.reduce((s,o)=>s+o.total,0);
+  const totalCust = newCount+oldCount;
+
+  if(!totalCust && !noCustOrders.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
+    return;
+  }
+
+  const rows = [
+    {label:'🆕 ลูกค้าใหม่', count:newCount, sum:newSum},
+    {label:'🔁 ลูกค้าเก่า', count:oldCount, sum:oldSum},
+  ].filter(r=>r.count>0);
+
+  tbody.innerHTML = rows.map(r=>`<tr>
+    <td style="font-weight:600;">${r.label}</td>
+    <td>${r.count} คน</td>
+    <td><span class="pill pill-blue">${totalCust>0?Math.round(r.count/totalCust*100):0}%</span></td>
+    <td>฿${r.sum.toLocaleString()}</td>
+    <td>฿${Math.round(r.sum/r.count).toLocaleString()}</td>
+  </tr>`).join('') + (noCustOrders.length ? `<tr style="color:var(--muted);">
+    <td>❔ ไม่ระบุลูกค้า</td>
+    <td>${noCustOrders.length} ออเดอร์</td>
+    <td>—</td>
+    <td>฿${noCustSum.toLocaleString()}</td>
+    <td>—</td>
+  </tr>` : '');
+}
+
 function renderSalesByCustType(orders){
   const tbody = document.getElementById('salesByCustTypeTable');
   if(!tbody) return;

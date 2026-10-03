@@ -33,7 +33,7 @@ const SyncEngine = (() => {
       ref_no: o.refNo || '', customer_id: o.customer ? o.customer.id : null,
       customer_name: o.customer ? o.customer.name : null, items: o.items,
       subtotal: o.subtotal, discount: o.discount, total: o.total, cost: o.cost,
-      profit: o.profit, pay_method: o.payMethod, promo_id: o.promoId ?? null,
+      profit: o.profit, pay_method: o.payMethod, promo_ids: o.promoIds && o.promoIds.length ? o.promoIds : null,
       status: o.status, received: o.received, change: o.change,
       gp_pct: o.gpPct ?? null, gp_amount: o.gpAmount ?? null, net_revenue: o.netRevenue ?? null,
       updated_at: new Date().toISOString(),
@@ -44,7 +44,7 @@ const SyncEngine = (() => {
       id: r.id, orderNo: r.order_no, date: r.date, time: r.time, type: r.type,
       refNo: r.ref_no || '', customer: r.customer_id ? { id: r.customer_id, name: r.customer_name } : null,
       items: r.items || [], subtotal: r.subtotal, discount: r.discount, total: r.total,
-      cost: r.cost, profit: r.profit, payMethod: r.pay_method, promoId: r.promo_id,
+      cost: r.cost, profit: r.profit, payMethod: r.pay_method, promoIds: r.promo_ids || [],
       status: r.status, received: r.received, change: r.change,
       gpPct: r.gp_pct, gpAmount: r.gp_amount, netRevenue: r.net_revenue,
     };
