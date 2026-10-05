@@ -2674,14 +2674,14 @@ function renderSalesReport(){
     <div class="stat-card"><div class="stat-label">จำนวนออเดอร์</div><div class="stat-value">${orders.length}</div></div>
     <div class="stat-card"><div class="stat-label">ส่วนลดรวม</div><div class="stat-value red">฿${totalDisc.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="stat-label">ค่าโฆษณา</div><div class="stat-value red">฿${adTotal.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังส่วนลด GP และโฆษณา)</div><div class="stat-value">฿${netAfterGp.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ค่าโฆษณา + แคมเปญ</div><div class="stat-value red">฿${adTotal.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังส่วนลด GP และโฆษณา + แคมเปญ)</div><div class="stat-value">฿${netAfterGp.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">รายจ่าย</div><div class="stat-value red">฿${expTotal.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">กำไรสุทธิ (หลังหักรายจ่าย)</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
 
   const missingAds=getAdAllocation().unallocated.filter(a=>dateMatchesPeriod(a.date,period,refKey));
-  if(missingAds.length) document.getElementById('salesStatCards').insertAdjacentHTML('beforeend',`<div class="stat-card"><div class="stat-label">ค่าโฆษณาที่ยังไม่มีออเดอร์สำหรับแบ่ง</div><div class="stat-value red">฿${money2(missingAds.reduce((s,a)=>s+a.amount,0)).toLocaleString()}</div><p>หักจากยอดขายสุทธิรวมแล้ว แต่ยังไม่หักฐานคอมมิชชั่นพนักงาน</p></div>`);
+  if(missingAds.length) document.getElementById('salesStatCards').insertAdjacentHTML('beforeend',`<div class="stat-card"><div class="stat-label">ค่าโฆษณา + แคมเปญที่ยังไม่มีออเดอร์สำหรับแบ่ง</div><div class="stat-value red">฿${money2(missingAds.reduce((s,a)=>s+a.amount,0)).toLocaleString()}</div><p>หักจากยอดขายสุทธิรวมแล้ว แต่ยังไม่หักฐานคอมมิชชั่นพนักงาน</p></div>`);
 
   // Simple chart
   renderSalesChart(orders, period, refKey);
@@ -3146,7 +3146,7 @@ function renderProfitReport(){
     <div class="stat-card"><div class="stat-label">กำไรสุทธิ (หลังหักรายจ่าย)</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
 
-  document.getElementById('profitStatCards').insertAdjacentHTML('beforeend',`<div class="stat-card"><div class="stat-label">ค่าโฆษณา</div><div class="stat-value red">฿${adTotal.toLocaleString()}</div></div><div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังส่วนลด GP และโฆษณา)</div><div class="stat-value">฿${netRevenueTotal.toLocaleString()}</div></div>`);
+  document.getElementById('profitStatCards').insertAdjacentHTML('beforeend',`<div class="stat-card"><div class="stat-label">ค่าโฆษณา + แคมเปญ</div><div class="stat-value red">฿${adTotal.toLocaleString()}</div></div><div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังส่วนลด GP และโฆษณา + แคมเปญ)</div><div class="stat-value">฿${netRevenueTotal.toLocaleString()}</div></div>`);
   const chTbody = document.getElementById('profitChannelTable');
   const chRows = channels.map(ch=>{
     const c = byChannel[ch];
@@ -3786,7 +3786,7 @@ const BACKUP_CORE_KEYS = {
   customers:'ลูกค้า', customerTypes:'ประเภทลูกค้า', expenses:'รายจ่าย', promotions:'โปรโมชั่น'
 };
 // Keys that are only created once the operator actually uses that feature — fine to be absent.
-const BACKUP_OPTIONAL_KEYS = { expenseCategories:'หมวดหมู่รายจ่าย', salespeople:'พนักงานขาย', adExpenses:'ค่าโฆษณา' };
+const BACKUP_OPTIONAL_KEYS = { expenseCategories:'หมวดหมู่รายจ่าย', salespeople:'พนักงานขาย', adExpenses:'ค่าโฆษณา + แคมเปญ' };
 // Singleton images now live in IndexedDB rather than localStorage.
 const BACKUP_IMAGE_KEYS = { shopLogo:'โลโก้ร้าน', posQrImage:'QR หน้าขาย', receiptQrImage:'QR ในใบเสร็จ' };
 
@@ -4265,21 +4265,21 @@ function getOrderAdCost(o){return getAdAllocation().allocations.get(o.id)||0;}
 function orderNetSales(o){return money2(orderAfterGp(o)-getOrderAdCost(o));}
 function getPeriodAds(period,key){return DB.get('adExpenses').filter(a=>dateMatchesPeriod(a.date,period,key));}
 let editingAdId=null;
-function openAdExpense(id=null){const a=id==null?null:DB.get('adExpenses').find(a=>a.id===id);editingAdId=a?.id??null;document.getElementById('adDate').value=a?.date||today();document.getElementById('adChannel').value=a?.channel||'grab';document.getElementById('adName').value=a?.name||'';document.getElementById('adAmount').value=a?.amount??'';document.getElementById('adNote').value=a?.note||'';document.getElementById('adSaveStatus').textContent='';openModal('adExpenseModal');}
+function openAdExpense(id=null){const a=id==null?null:DB.get('adExpenses').find(a=>a.id===id);editingAdId=a?.id??null;document.getElementById('adDate').value=a?.date||today();document.getElementById('adChannel').value=a?.channel||'grab';document.getElementById('adKind').value=a?.kind||'advertisement';document.getElementById('adName').value=a?.name||'';document.getElementById('adAmount').value=a?.amount??'';document.getElementById('adNote').value=a?.note||'';document.getElementById('adSaveStatus').textContent='';openModal('adExpenseModal');}
 function saveAdExpense(){
-  try{const date=document.getElementById('adDate').value,channel=document.getElementById('adChannel').value,name=document.getElementById('adName').value.trim(),raw=document.getElementById('adAmount').value,amount=Number(raw),note=document.getElementById('adNote').value.trim();
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||!['instore','grab','lineman'].includes(channel)||!name||raw===''||!Number.isFinite(amount)||money2(amount)<=0)throw Error('กรอกวันที่ ช่องทาง ชื่อรายการ และจำนวนเงินมากกว่า 0 ให้ครบ');
-    const rows=DB.get('adExpenses'),id=editingAdId??Math.max(Date.now(),...rows.map(a=>Number(a.id)+1));const entry={id,date,channel,name,amount:money2(amount),note};
+  try{const kind=document.getElementById('adKind').value,date=document.getElementById('adDate').value,channel=document.getElementById('adChannel').value,name=document.getElementById('adName').value.trim(),raw=document.getElementById('adAmount').value,amount=Number(raw),note=document.getElementById('adNote').value.trim();
+    if(!['advertisement','campaign'].includes(kind)||!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||!['instore','grab','lineman'].includes(channel)||!name||raw===''||!Number.isFinite(amount)||money2(amount)<=0)throw Error('กรอกวันที่ ช่องทาง ชื่อรายการ และจำนวนเงินมากกว่า 0 ให้ครบ');
+    const rows=DB.get('adExpenses'),id=editingAdId??Math.max(Date.now(),...rows.map(a=>Number(a.id)+1));const entry={id,date,channel,kind,name,amount:money2(amount),note};
     if(editingAdId!=null&&!rows.some(a=>a.id===editingAdId))throw Error('รายการนี้ถูกลบแล้ว กรุณาเปิดใหม่');
     const next=editingAdId==null?[...rows,entry]:rows.map(a=>a.id===id?entry:a);if(!DB.set('adExpenses',next))return;
-    closeModal('adExpenseModal');renderExpTable();showToast('บันทึกค่าโฆษณาและคำนวณค่าคอมมิชชั่นใหม่แล้ว','success');
+    closeModal('adExpenseModal');renderExpTable();showToast('บันทึกค่าโฆษณา + แคมเปญและคำนวณค่าคอมมิชชั่นใหม่แล้ว','success');
   }catch(e){document.getElementById('adSaveStatus').textContent=e.message;}
 }
-function deleteAdExpense(id){if(!confirm('ลบค่าโฆษณารายการนี้? ยอดขายสุทธิและคอมมิชชั่นจะคำนวณใหม่'))return;if(DB.set('adExpenses',DB.get('adExpenses').filter(a=>a.id!==id)))renderExpTable();}
+function deleteAdExpense(id){if(!confirm('ลบค่าโฆษณา + แคมเปญรายการนี้? ยอดขายสุทธิและคอมมิชชั่นจะคำนวณใหม่'))return;if(DB.set('adExpenses',DB.get('adExpenses').filter(a=>a.id!==id)))renderExpTable();}
 function renderAdExpenses(period,key){
   const ads=key?getPeriodAds(period,key):DB.get('adExpenses');const total=money2(ads.reduce((s,a)=>s+a.amount,0));
   const missing=getAdAllocation().unallocated.filter(a=>!key||dateMatchesPeriod(a.date,period,key));
-  document.getElementById('adPeriodTotal').textContent=`ค่าโฆษณารวม ฿${total.toLocaleString()} — แยกจากรายจ่ายทั่วไป`;
-  document.getElementById('adAllocationNote').textContent=missing.length?'ยังไม่มีออเดอร์โฆษณาที่มียอดหลัง GP เป็นบวกสำหรับ: '+missing.map(a=>`${a.date} ${adChannelLabel(a.channel)} ฿${a.amount}`).join(', ')+' ค่าโฆษณายังคงหักจากยอดสุทธิรวม แต่ยังไม่แบ่งให้พนักงาน':'';
-  document.getElementById('adExpenseTable').innerHTML=ads.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).map(a=>`<tr><td>${a.date}</td><td>${safeStaffText(a.name)}</td><td>${adChannelLabel(a.channel)}</td><td>฿${a.amount.toLocaleString()}</td><td>${safeStaffText(a.note||'—')}</td><td><button class="btn btn-ghost btn-sm" onclick="openAdExpense(${a.id})">แก้ไข</button> <button class="btn btn-danger btn-sm" onclick="deleteAdExpense(${a.id})">ลบ</button></td></tr>`).join('')||'<tr><td colspan="6">ไม่มีค่าโฆษณา</td></tr>';
+  document.getElementById('adPeriodTotal').textContent=`ค่าโฆษณา + แคมเปญรวม ฿${total.toLocaleString()} — แยกจากรายจ่ายทั่วไป`;
+  document.getElementById('adAllocationNote').textContent=missing.length?'ยังไม่มีออเดอร์โฆษณาที่มียอดหลัง GP เป็นบวกสำหรับ: '+missing.map(a=>`${a.date} ${adChannelLabel(a.channel)} ฿${a.amount}`).join(', ')+' ค่าโฆษณา + แคมเปญยังคงหักจากยอดสุทธิรวม แต่ยังไม่แบ่งให้พนักงาน':'';
+  document.getElementById('adExpenseTable').innerHTML=ads.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).map(a=>`<tr><td>${a.date}</td><td>${a.kind==='campaign'?'แคมเปญ':'โฆษณา'}</td><td>${safeStaffText(a.name)}</td><td>${adChannelLabel(a.channel)}</td><td>฿${a.amount.toLocaleString()}</td><td>${safeStaffText(a.note||'—')}</td><td><button class="btn btn-ghost btn-sm" onclick="openAdExpense(${a.id})">แก้ไข</button> <button class="btn btn-danger btn-sm" onclick="deleteAdExpense(${a.id})">ลบ</button></td></tr>`).join('')||'<tr><td colspan="7">ไม่มีค่าโฆษณา + แคมเปญหรือแคมเปญ</td></tr>';
 }
