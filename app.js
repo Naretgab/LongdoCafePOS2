@@ -197,6 +197,7 @@ async function migrateImagesToIndexedDB() {
 }
 window.addEventListener('DOMContentLoaded', async () => {
   initDB();
+  renderStaffControls();
   if (typeof SyncEngine !== 'undefined') SyncEngine.init(); // Supabase sync
   updateTopbarDate();
   setInterval(updateTopbarDate, 60000);
@@ -264,6 +265,7 @@ function showPage(name) {
   // Close sidebar on mobile
   if(window.innerWidth<900) closeSidebar();
   // Render page-specific content
+  if(name==='pos') renderStaffControls();
   if(name==='menu') { renderMenuTable(); renderAddonGroupList(); }
   if(name==='categories') renderCatGrid();
   if(name==='customers') renderCustomerTable();
@@ -274,7 +276,7 @@ function showPage(name) {
   if(name==='report-sales') renderSalesReport();
   if(name==='report-profit') renderProfitReport();
   if(name==='report-products') renderTopProductsReport();
-  if(name==='settings') loadSettings();
+  if(name==='settings') { loadSettings(); renderStaffControls(); }
 }
 
 function toggleSidebar() {
@@ -534,7 +536,9 @@ function getDaySales() {
 }
 
 function clearCart() {
-  if(!cart.length) return;
+  selectedSalesperson = null;
+  renderStaffControls();
+  document.getElementById("posAdvertisement").checked = false;
   cart=[];
   cartCustomer=null;
   cartPromoIds=[];
@@ -975,6 +979,7 @@ function confirmPayment() {
     type: posType, refNo: (posType==='grab'||posType==='lineman') ? (document.getElementById('refOrderNo')?.value.trim()||'') : '',
     customer: cartCustomer?{id:cartCustomer.id,name:cartCustomer.name}:null,
     items: cart.map(i=>({id:i.menuId,name:i.name,icon:i.icon,qty:i.qty,price:i.price,total:i.total,cost:i.cost,addons:i.addons||[],note:i.note||'',customPrice:i.customPrice??null,itemDiscount:i.itemDiscount||0,itemDiscountType:i.itemDiscountType||'thb'})),
+    ...salesMetadata(total),
     subtotal, discount:disc, total, cost, profit:total-cost,
     gpPct, gpAmount, netRevenue: total-gpAmount, // GP ที่โดนหักตอนขาย (บันทึกติดออเดอร์ ไม่ใช้ค่าตั้งค่าปัจจุบันย้อนหลัง)
     payMethod, promoIds, status:'completed',
@@ -1038,6 +1043,7 @@ function saveEditedOrder(total) {
     type: posType, refNo: (posType==='grab'||posType==='lineman') ? (document.getElementById('refOrderNo')?.value.trim()||'') : '',
     customer: cartCustomer?{id:cartCustomer.id,name:cartCustomer.name}:null,
     items: cart.map(i=>({id:i.menuId,name:i.name,icon:i.icon,qty:i.qty,price:i.price,total:i.total,cost:i.cost,addons:i.addons||[],note:i.note||'',customPrice:i.customPrice??null,itemDiscount:i.itemDiscount||0,itemDiscountType:i.itemDiscountType||'thb'})),
+    ...salesMetadata(total),
     subtotal, discount:disc, total, cost, profit:total-cost,
     gpPct, gpAmount, netRevenue: total-gpAmount,
     payMethod, promoIds: [...cartPromoIds],
@@ -1354,7 +1360,7 @@ function renderOrdersTable() {
   const date = document.getElementById('ordersDate')?.value||'';
   let filtered = date ? orders.filter(o=>o.date===date) : orders;
   if(ordersTypeFilter!=='all') filtered = filtered.filter(o=>o.type===ordersTypeFilter);
-  if(!filtered.length) { tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px;">ไม่มีรายการ</td></tr>`; return; }
+  if(!filtered.length) { tbody.innerHTML=`<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:24px;">ไม่มีรายการ</td></tr>`; return; }
 
   const rowHtml = (o,n) => {
     const gpAmt = getOrderGpAmount(o,gp);
@@ -1366,6 +1372,9 @@ function renderOrdersTable() {
       <td>${o.date} ${o.time}</td>
       <td>${o.customer?.name||'—'}</td>
       <td><span class="pill ${o.type==='grab'?'pill-green':o.type==='lineman'?'pill-gold':'pill-blue'}">${o.type==='grab'?'Grab':o.type==='lineman'?'LINE MAN':'หน้าร้าน'}</span>${o.refNo?`<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:2px;">#${o.refNo}</div>`:''}</td>
+      <td>${safeStaffText(o.salesperson?.name||'—')}</td>
+      <td>${o.isAdvertisement?'📣 โฆษณา':'—'}</td>
+      <td><input aria-label="ส่วนลดรวมออเดอร์ ${o.orderNo} (บาท)" type="number" min="0" max="${o.subtotal}" step="0.01" value="${o.discount||0}" style="width:90px;" ${o.status==='cancelled'?'disabled':''} onchange="updateOrderDiscount(${o.id},this.value)"></td>
       <td>${o.items.reduce((s,i)=>s+(i.qty||1),0)} รายการ</td>
       <td style="font-weight:600;">฿${o.total}</td>
       <td style="color:var(--red);">${gpAmt>0?'-฿'+gpAmt.toLocaleString()+' ('+gpPct+'%)'+(estimated?' <span class="pill pill-gold" style="font-size:0.6rem;">ประมาณ</span>':''):'—'}</td>
@@ -1402,7 +1411,7 @@ function renderOrdersTable() {
   tbody.innerHTML = groups.map(g=>{
     const dayTotal = g.orders.reduce((s,o)=>s+(o.status==='cancelled'?0:o.total),0);
     const header = `<tr>
-      <td colspan="10" style="background:var(--foam);font-weight:700;padding:8px 10px;">
+      <td colspan="13" style="background:var(--foam);font-weight:700;padding:8px 10px;">
         📅 ${g.date} <span style="font-weight:400;color:var(--muted);margin-left:8px;">${g.orders.length} ออเดอร์</span>
         <span style="float:right;color:var(--sage);">รวม ฿${dayTotal.toLocaleString()}</span>
       </td>
@@ -1505,6 +1514,9 @@ function editOrder(id) {
   }));
 
   cartCustomer = order.customer ? (DB.get('customers').find(c=>c.id===order.customer.id) || order.customer) : null;
+  selectedSalesperson = order.salesperson || null;
+  renderStaffControls();
+  document.getElementById("posAdvertisement").checked = !!order.isAdvertisement;
   posType = order.type;
   cartPromoIds = order.promoIds ? [...order.promoIds] : [];
 
@@ -2400,7 +2412,7 @@ function deleteExpCat(name){
 function renderExpTable(){
   const period = reportPeriod.expenses||'all';
   const refKey = syncExpPickers(period);
-  const allExps = DB.get('expenses').slice().reverse();
+  const allExps = getAllExpenses().slice().reverse();
   let exps = refKey ? allExps.filter(e=>dateMatchesPeriod(e.date, period, refKey)) : allExps;
   exps = applySortOption(exps, document.getElementById('expSort')?.value||'date_desc', 'name', 'date');
   const tbody=document.getElementById('expTable');
@@ -2419,8 +2431,8 @@ function renderExpTable(){
     <td>${e.receipt?`<img class="receipt-thumb" id="expThumb-${e.id}" data-exp-id="${e.id}" onclick="viewReceiptFor(${e.id})">`:'—'}</td>
     <td>
       <div style="display:flex;gap:4px;">
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="editExpense(${e.id})">✏️</button>
-        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExp(${e.id})">🗑️</button>
+        ${e.automatic ? '<span class="pill pill-gray">คำนวณอัตโนมัติ</span>' : `<button class="btn btn-ghost btn-sm btn-icon" onclick="editExpense(${e.id})">✏️</button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExp(${e.id})">🗑️</button>`}
       </div>
     </td>
   </tr>`).join('');
@@ -2646,7 +2658,7 @@ function renderSalesReport(){
     const m = menuMap.get(i.id);
     return s2+(m?(m.cost||0):(i.cost||0))*i.qty;
   },0),0);
-  const expenses = DB.get('expenses').filter(e=>dateMatchesPeriod(e.date, period, refKey));
+  const expenses = getAllExpenses().filter(e=>dateMatchesPeriod(e.date, period, refKey));
   const expTotal = expenses.reduce((s,e)=>s+e.amount,0);
   const netProfit = netAfterGp-cost-expTotal;
 
@@ -2664,6 +2676,8 @@ function renderSalesReport(){
   renderSalesChart(orders, period, refKey);
   renderCompareChart(period, refKey);
   renderSalesByType(orders);
+  renderStaffSummary(orders);
+  document.getElementById("salesStatCards").insertAdjacentHTML("beforeend", `<div class="stat-card"><div class="stat-label">ออเดอร์จากโฆษณา</div><div class="stat-value">${orders.filter(o=>o.isAdvertisement).length}</div></div><div class="stat-card"><div class="stat-label">ค่าคอมมิชชั่น (รวมในรายจ่าย)</div><div class="stat-value red">฿${orders.reduce((s,o)=>s+orderCommission(o),0).toLocaleString()}</div></div>`);
   renderSalesByCustType(orders);
   renderCustomerAnalysis(orders, period, refKey);
   renderExpByCat(expenses);
@@ -2732,7 +2746,7 @@ function renderCompareChart(period, refKey){
   if(!container) return;
 
   const allOrders = DB.get('orders').filter(o=>o.status!=='cancelled');
-  const allExpenses = DB.get('expenses');
+  const allExpenses = getAllExpenses();
   const pad = n => String(n).padStart(2,'0');
   let buckets = [];
 
@@ -2820,7 +2834,7 @@ function renderCompareHistoryChart(){
   if(!chartEl) return;
 
   const allOrders = DB.get('orders').filter(o=>o.status!=='cancelled');
-  const allExpenses = DB.get('expenses');
+  const allExpenses = getAllExpenses();
 
   const dateSet = new Set();
   allOrders.forEach(o=>o.date && dateSet.add(o.date));
@@ -2895,15 +2909,15 @@ function renderSalesByType(orders){
     const list = orders.filter(t.match);
     const sum = list.reduce((s,o)=>s+o.total,0);
     const avg = list.length>0 ? Math.round(sum/list.length) : 0;
-    return {label:t.label, count:list.length, sum, avg, pct: total>0?Math.round(sum/total*100):0};
+    return {label:t.label, ads:list.filter(o=>o.isAdvertisement).length, count:list.length, sum, avg, pct: total>0?Math.round(sum/total*100):0};
   });
   if(!orders.length){
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r=>`<tr>
     <td>${r.label}</td>
-    <td>${r.count}</td>
+    <td>${r.count}</td><td>${r.ads}</td>
     <td style="font-weight:600;">฿${r.sum.toLocaleString()}</td>
     <td>฿${r.avg.toLocaleString()}</td>
     <td>
@@ -3026,7 +3040,7 @@ function renderSalesByCustType(orders){
 function renderExpByCat(expenses){
   const tbody = document.getElementById('expByCatTable');
   if(!tbody) return;
-  const cats = getExpenseCategories();
+  const cats = [...new Set([...getExpenseCategories(), ...expenses.map(e=>e.cat||'อื่นๆ')])];
   const total = expenses.reduce((s,e)=>s+e.amount,0);
   const rows = cats.map(c=>{
     const list = expenses.filter(e=>(e.cat||'อื่นๆ')===c);
@@ -3101,7 +3115,7 @@ function renderProfitReport(){
   const netRevenueTotal = revenue - gpAmountTotal;
   const profit = netRevenueTotal-cost; // กำไรขั้นต้นหลังหัก GP แล้ว (ต้นทุนคำนวณจากราคาวัตถุดิบปัจจุบัน)
   const gpPctOfRevenue = revenue>0?Math.round(profit/revenue*100):0;
-  const expenses = DB.get('expenses').filter(e=>dateMatchesPeriod(e.date, period, refKey));
+  const expenses = getAllExpenses().filter(e=>dateMatchesPeriod(e.date, period, refKey));
   const expTotal = expenses.reduce((s,e)=>s+e.amount,0);
   const netProfit = profit-expTotal;
   const anyEstimated = channels.some(ch=>byChannel[ch].estimated);
@@ -3753,7 +3767,7 @@ const BACKUP_CORE_KEYS = {
   customers:'ลูกค้า', customerTypes:'ประเภทลูกค้า', expenses:'รายจ่าย', promotions:'โปรโมชั่น'
 };
 // Keys that are only created once the operator actually uses that feature — fine to be absent.
-const BACKUP_OPTIONAL_KEYS = { expenseCategories:'หมวดหมู่รายจ่าย' };
+const BACKUP_OPTIONAL_KEYS = { expenseCategories:'หมวดหมู่รายจ่าย', salespeople:'พนักงานขาย' };
 // Singleton images now live in IndexedDB rather than localStorage.
 const BACKUP_IMAGE_KEYS = { shopLogo:'โลโก้ร้าน', posQrImage:'QR หน้าขาย', receiptQrImage:'QR ในใบเสร็จ' };
 
@@ -4002,4 +4016,80 @@ function importData(event){
 // ── SERVICE WORKER REGISTER ───────────────────────────────────
 if('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+
+// Phase 6: staff snapshots, advertising attribution and inline total discounts.
+let selectedSalesperson = null;
+const money2 = n => Math.round((Number(n)+Number.EPSILON)*100)/100;
+function safeStaffText(v) { return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function orderCommission(o) {
+  if(o.status==='cancelled'||!o.salesperson) return 0;
+  const rate = Math.max(0,Number(o.salesperson.rate)||0);
+  // o.total already includes the order discount; subtract GP only once.
+  const gp = DB.get('gpSettings', {instore:0,grab:32.1,lineman:32.1});
+  const gpAmount = Number(o.gpAmount ?? (o.gpPct != null ? money2(o.total*o.gpPct/100) : getOrderGpAmount(o,gp)));
+  const commissionBase = Math.max(0,money2(Number(o.total)-gpAmount));
+  return money2(o.salesperson.commissionType==='pct' ? commissionBase*rate/100 : rate);
+}
+function getAllExpenses() {
+  return [...DB.get('expenses'), ...DB.get('orders').filter(o=>o.status!=='cancelled'&&o.salesperson&&orderCommission(o)>0).map(o=>({
+    id:'commission-'+o.id, date:o.date, name:'ค่าคอมมิชชั่น '+safeStaffText(o.salesperson.name),
+    cat:'ค่าคอมมิชชั่นพนักงาน', amount:orderCommission(o), note:'ออเดอร์ #'+o.orderNo, automatic:true
+  }))];
+}
+function salesMetadata(total) {
+  return {salesperson:selectedSalesperson?{...selectedSalesperson}:null, isAdvertisement:!!document.getElementById('posAdvertisement')?.checked};
+}
+function selectSalesperson(id) {
+  if(selectedSalesperson&&String(selectedSalesperson.id)===id) return;
+  const person=DB.get('salespeople').find(p=>String(p.id)===id&&!p.inactive);
+  selectedSalesperson=person?{...person}:null;
+}
+function renderStaffControls() {
+  const people=DB.get('salespeople');
+  const select=document.getElementById('posSalesperson');
+  const selectable=people.filter(p=>!p.inactive);
+  if(selectedSalesperson&&!selectable.some(p=>p.id===selectedSalesperson.id)) selectable.push(selectedSalesperson);
+  if(select) { select.innerHTML='<option value="">ไม่ระบุพนักงาน</option>'+selectable.map(p=>`<option value="${p.id}">${safeStaffText(p.name)}</option>`).join(''); select.value=selectedSalesperson?String(selectedSalesperson.id):''; }
+  const list=document.getElementById('staffList');
+  if(list) list.innerHTML='<table><thead><tr><th>ชื่อ</th><th>วิธีคิด</th><th>อัตรา</th><th></th></tr></thead><tbody>'+people.filter(p=>!p.inactive).map(p=>`<tr><td><input aria-label="ชื่อพนักงาน" value="${safeStaffText(p.name)}" onchange="updateSalesperson(${p.id},'name',this.value)"></td><td><select onchange="updateSalesperson(${p.id},'commissionType',this.value)"><option value="pct" ${p.commissionType==='pct'?'selected':''}>%</option><option value="thb" ${p.commissionType==='thb'?'selected':''}>บาท/ออเดอร์</option></select></td><td><input aria-label="อัตราคอมมิชชั่น" style="width:90px;" type="number" min="0" step="0.01" value="${p.rate}" onchange="updateSalesperson(${p.id},'rate',this.value)"></td><td><button class="btn btn-danger btn-sm" onclick="removeSalesperson(${p.id})">ลบพนักงาน</button></td></tr>`).join('')+'</tbody></table>';
+}
+function validStaffRate(type,rate) { return Number.isFinite(rate)&&rate>=0&&(type!=='pct'||rate<=100); }
+function addSalesperson() {
+  const name=document.getElementById('staffName').value.trim(), commissionType=document.getElementById('staffCommissionType').value, rate=Number(document.getElementById('staffCommissionRate').value);
+  if(!name||!validStaffRate(commissionType,rate)) { showToast('กรอกชื่อและอัตราให้ถูกต้อง (เปอร์เซ็นต์ 0–100)','error'); return; }
+  const people=DB.get('salespeople');people.push({id:Math.max(Date.now(),...people.map(p=>p.id+1)),name,commissionType,rate:money2(rate)});
+  if(!DB.set('salespeople',people))return;
+  document.getElementById('staffName').value='';renderStaffControls();showToast('เพิ่มพนักงานแล้ว','success');
+}
+function updateSalesperson(id,key,value) {
+  const people=DB.get('salespeople'), p=people.find(p=>p.id===id);if(!p)return;
+  const next={...p,[key]:key==='rate'?Number(value):String(value).trim()};
+  if(!next.name||!validStaffRate(next.commissionType,next.rate)){showToast('ชื่อหรืออัตราไม่ถูกต้อง','error');renderStaffControls();return;}
+  Object.assign(p,next);if(!DB.set('salespeople',people))return;
+  if(!editingOrderId&&selectedSalesperson?.id===id)selectedSalesperson={...p};renderStaffControls();
+}
+function removeSalesperson(id) {
+  if(!confirm('ลบพนักงานออกจากรายการขาย? ประวัติและค่าคอมมิชชั่นในออเดอร์เดิมยังคงอยู่'))return;
+  const people=DB.get('salespeople');const p=people.find(p=>p.id===id);if(!p)return;p.inactive=true;
+  if(!DB.set('salespeople',people))return;
+  if(!editingOrderId&&selectedSalesperson?.id===id)selectedSalesperson=null;renderStaffControls();
+}
+function renderStaffSummary(orders) {
+  const groups=new Map();orders.forEach(o=>{const key=o.salesperson?.id??'none';if(!groups.has(key))groups.set(key,{name:o.salesperson?.name||'ไม่ระบุพนักงาน',count:0,ads:0,total:0,commission:0});const g=groups.get(key);g.count++;g.ads+=o.isAdvertisement?1:0;g.total+=o.total;g.commission+=orderCommission(o);});
+  const el=document.getElementById('staffSalesSummary');if(el)el.innerHTML=[...groups.values()].map(g=>`<tr><td>${safeStaffText(g.name)}</td><td>${g.count}</td><td>${g.ads}</td><td>฿${money2(g.total).toLocaleString()}</td><td>฿${money2(g.commission).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan="5">ไม่มีข้อมูล</td></tr>';
+}
+function updateOrderDiscount(id,value) {
+  const orders=DB.get('orders'), o=orders.find(o=>o.id===id);if(!o||o.status==='cancelled')return;
+  const discount=Number(value), subtotal=Number(o.subtotal??o.items.reduce((s,i)=>s+i.total,0));
+  if(!Number.isFinite(discount)||discount<0||discount>subtotal){showToast('ส่วนลดต้องอยู่ระหว่าง 0 และยอดก่อนส่วนลด','error');renderOrdersTable();return;}
+  const oldTotal=o.total;o.discount=money2(discount);o.total=money2(subtotal-o.discount);o.subtotal=subtotal;
+  // Preserve the original GP rate, including estimated legacy rates, on this edit.
+  o.gpPct=Number(o.gpPct??DB.get('gpSettings',{} )[o.type]??0);
+  o.gpAmount=money2(o.total*o.gpPct/100);o.netRevenue=money2(o.total-o.gpAmount);o.profit=money2(o.total-(o.cost||0));
+  if(o.payMethod==='cash')o.change=money2(Math.max(0,(o.received||0)-o.total));else{o.received=o.total;o.change=0;}
+  if(!DB.set('orders',orders)){renderOrdersTable();return;}
+  if(o.customer){const customers=DB.get('customers'),c=customers.find(c=>c.id===o.customer.id);if(c){c.total=money2((c.total||0)+o.total-oldTotal);DB.set('customers',customers);}}
+  if(editingOrderId===id){editingOrderId=null;editingOrderOriginal=null;clearCart();document.getElementById('editOrderBanner').style.display='none';}
+  renderOrdersTable();showToast('บันทึกส่วนลดและคำนวณยอดใหม่แล้ว','success');
 }

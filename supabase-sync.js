@@ -36,6 +36,7 @@ const SyncEngine = (() => {
       profit: o.profit, pay_method: o.payMethod, promo_ids: o.promoIds && o.promoIds.length ? o.promoIds : null,
       status: o.status, received: o.received, change: o.change,
       gp_pct: o.gpPct ?? null, gp_amount: o.gpAmount ?? null, net_revenue: o.netRevenue ?? null,
+      salesperson: o.salesperson || null, is_advertisement: !!o.isAdvertisement,
       updated_at: new Date().toISOString(),
     };
   }
@@ -47,6 +48,7 @@ const SyncEngine = (() => {
       cost: r.cost, profit: r.profit, payMethod: r.pay_method, promoIds: r.promo_ids || [],
       status: r.status, received: r.received, change: r.change,
       gpPct: r.gp_pct, gpAmount: r.gp_amount, netRevenue: r.net_revenue,
+      salesperson: r.salesperson || null, isAdvertisement: !!r.is_advertisement,
     };
   }
   function customerToRow(c) {
@@ -136,7 +138,7 @@ const SyncEngine = (() => {
   };
 
   // ── singleton settings: whole-object upsert into one "settings" table ──
-  const SETTINGS_KEYS = ['shopInfo', 'gpSettings', 'printerSettings', 'expenseCategories', 'orderSeq'];
+  const SETTINGS_KEYS = ['shopInfo', 'gpSettings', 'printerSettings', 'expenseCategories', 'salespeople', 'orderSeq'];
 
   const QUEUE_KEY = 'ld_syncQueue';
   const SNAP_PREFIX = 'ld_syncSnapshot_';
