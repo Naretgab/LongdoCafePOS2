@@ -536,7 +536,9 @@ function getDaySales() {
 }
 
 function clearCart() {
-  selectedSalesperson = null;
+  // Restore the current sales operator, never the historical snapshot from an edited order.
+  const person = DB.get('salespeople').find(p=>String(p.id)===preferredSalespersonId&&!p.inactive);
+  selectedSalesperson = person ? {...person} : null;
   renderStaffControls();
   document.getElementById("posAdvertisement").checked = false;
   cart=[];
@@ -4022,6 +4024,7 @@ if('serviceWorker' in navigator) {
 
 // Phase 6: staff snapshots, advertising attribution and inline total discounts.
 let selectedSalesperson = null;
+let preferredSalespersonId = "";
 const money2 = n => Math.round((Number(n)+Number.EPSILON)*100)/100;
 function safeStaffText(v) { return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function orderCommission(o) {
@@ -4043,6 +4046,7 @@ function salesMetadata(total) {
   return {salesperson:selectedSalesperson?{...selectedSalesperson}:null, isAdvertisement:!!document.getElementById('posAdvertisement')?.checked};
 }
 function selectSalesperson(id) {
+  if(!editingOrderId) preferredSalespersonId = id;
   if(selectedSalesperson&&String(selectedSalesperson.id)===id) return;
   const person=DB.get('salespeople').find(p=>String(p.id)===id&&!p.inactive);
   selectedSalesperson=person?{...person}:null;
@@ -4101,6 +4105,7 @@ function removeSalesperson(id) {
   if(!confirm('ลบพนักงานออกจากรายการขาย? ประวัติและค่าคอมมิชชั่นในออเดอร์เดิมยังคงอยู่'))return;
   const people=DB.get('salespeople');const p=people.find(p=>p.id===id);if(!p)return;p.inactive=true;
   if(!DB.set('salespeople',people))return;
+  if(preferredSalespersonId===String(id))preferredSalespersonId='';
   if(!editingOrderId&&selectedSalesperson?.id===id)selectedSalesperson=null;renderStaffControls();
 }
 function renderStaffSummary(orders) {
