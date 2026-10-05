@@ -2416,6 +2416,7 @@ function deleteExpCat(name){
 function renderExpTable(){
   const period = reportPeriod.expenses||'all';
   const refKey = syncExpPickers(period);
+  renderAdExpenses(period,refKey);
   const allExps = getAllExpenses().slice().reverse();
   let exps = refKey ? allExps.filter(e=>dateMatchesPeriod(e.date, period, refKey)) : allExps;
   exps = applySortOption(exps, document.getElementById('expSort')?.value||'date_desc', 'name', 'date');
@@ -2656,7 +2657,9 @@ function renderSalesReport(){
   const total = orders.reduce((s,o)=>s+o.total,0);
   const totalDisc = orders.reduce((s,o)=>s+(o.discount||0),0);
   const gpAmountTotal = orders.reduce((s,o)=>s+getOrderGpAmount(o,gp),0);
-  const netAfterGp = total-gpAmountTotal;
+  const ads = getPeriodAds(period,refKey);
+  const adTotal = money2(ads.reduce((s,a)=>s+a.amount,0));
+  const netAfterGp = money2(total-gpAmountTotal-adTotal);
   // ต้นทุนใช้ราคาวัตถุดิบปัจจุบัน (เหมือนหน้ากำไรขาดทุน) เพื่อให้กำไรสุทธิตรงกันทั้งสองหน้า
   const cost = orders.reduce((s,o)=>s+o.items.reduce((s2,i)=>{
     const m = menuMap.get(i.id);
@@ -2671,15 +2674,19 @@ function renderSalesReport(){
     <div class="stat-card"><div class="stat-label">จำนวนออเดอร์</div><div class="stat-value">${orders.length}</div></div>
     <div class="stat-card"><div class="stat-label">ส่วนลดรวม</div><div class="stat-value red">฿${totalDisc.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังหัก GP)</div><div class="stat-value">฿${netAfterGp.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ค่าโฆษณา</div><div class="stat-value red">฿${adTotal.toLocaleString()}</div></div>
+    <div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังส่วนลด GP และโฆษณา)</div><div class="stat-value">฿${netAfterGp.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">รายจ่าย</div><div class="stat-value red">฿${expTotal.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">กำไรสุทธิ (หลังหักรายจ่าย)</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
 
+  const missingAds=getAdAllocation().unallocated.filter(a=>dateMatchesPeriod(a.date,period,refKey));
+  if(missingAds.length) document.getElementById('salesStatCards').insertAdjacentHTML('beforeend',`<div class="stat-card"><div class="stat-label">ค่าโฆษณาที่ยังไม่มีออเดอร์สำหรับแบ่ง</div><div class="stat-value red">฿${money2(missingAds.reduce((s,a)=>s+a.amount,0)).toLocaleString()}</div><p>หักจากยอดขายสุทธิรวมแล้ว แต่ยังไม่หักฐานคอมมิชชั่นพนักงาน</p></div>`);
+
   // Simple chart
   renderSalesChart(orders, period, refKey);
   renderCompareChart(period, refKey);
-  renderSalesByType(orders);
+  renderSalesByType(orders,ads);
   renderStaffSummary(orders);
   document.getElementById("salesStatCards").insertAdjacentHTML("beforeend", `<div class="stat-card"><div class="stat-label">ออเดอร์จากโฆษณา</div><div class="stat-value">${orders.filter(o=>o.isAdvertisement).length}</div></div><div class="stat-card"><div class="stat-label">ค่าคอมมิชชั่น (รวมในรายจ่าย)</div><div class="stat-value red">฿${orders.reduce((s,o)=>s+orderCommission(o),0).toLocaleString()}</div></div>`);
   renderSalesByCustType(orders);
@@ -2688,7 +2695,7 @@ function renderSalesReport(){
 
   // Table
   const tbody=document.getElementById('salesReportTable');
-  if(!orders.length){tbody.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;return;}
+  if(!orders.length){tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;return;}
   tbody.innerHTML=orders.slice().reverse().map(o=>{
     const gpAmt = getOrderGpAmount(o,gp);
     const gpPct = o.gpPct ?? gp[o.type] ?? 0;
@@ -2702,7 +2709,8 @@ function renderSalesReport(){
     <td style="color:var(--red);">${o.discount>0?'-฿'+o.discount:'—'}</td>
     <td style="font-weight:600;">฿${o.total}</td>
     <td style="color:var(--red);">${gpAmt>0?'-฿'+gpAmt.toLocaleString()+' ('+gpPct+'%)'+(estimated?' <span class="pill pill-gold" style="font-size:0.6rem;">ประมาณ</span>':''):'—'}</td>
-    <td style="font-weight:600;">฿${(o.total-gpAmt).toLocaleString()}</td>
+    <td style="color:var(--red);">฿${getOrderAdCost(o).toLocaleString()}</td>
+    <td style="font-weight:600;">฿${orderNetSales(o).toLocaleString()}</td>
   </tr>`;}).join('');
 }
 
@@ -2785,16 +2793,16 @@ function renderCompareChart(period, refKey){
   }
 
   buckets.forEach(b=>{
-    b.sales = allOrders.filter(b.match).reduce((s,o)=>s+o.total,0);
+    b.sales = money2(allOrders.filter(b.match).reduce((s,o)=>s+orderAfterGp(o),0)-DB.get('adExpenses').filter(b.match).reduce((s,a)=>s+a.amount,0));
     b.exp = allExpenses.filter(b.match).reduce((s,e)=>s+e.amount,0);
   });
 
-  const max = Math.max(...buckets.map(b=>Math.max(b.sales,b.exp)), 1);
+  const max = Math.max(...buckets.map(b=>Math.max(Math.abs(b.sales),b.exp)), 1);
 
   const renderRow = rowBuckets => `
     <div class="chart-compare">${rowBuckets.map(b=>`
       <div class="bar-group">
-        <div class="bar-sales" style="height:${Math.max(3,b.sales/max*120)}px;" title="ยอดขาย ${b.label}: ฿${b.sales.toLocaleString()}">${b.sales>0?`<span class="bar-val v-sales">${fmtCompact(b.sales)}</span>`:''}</div>
+        <div class="bar-sales" style="height:${Math.max(3,Math.abs(b.sales)/max*120)}px;background:${b.sales<0?'var(--red)':'var(--sage)'};" title="ยอดขายสุทธิ ${b.label}: ฿${b.sales.toLocaleString()}">${b.sales!==0?`<span class="bar-val v-sales">${fmtCompact(b.sales)}</span>`:''}</div>
         <div class="bar-expense" style="height:${Math.max(3,b.exp/max*120)}px;" title="รายจ่าย ${b.label}: ฿${b.exp.toLocaleString()}">${b.exp>0?`<span class="bar-val v-expense">${fmtCompact(b.exp)}</span>`:''}</div>
       </div>`).join('')}</div>
     <div style="display:flex;gap:2px;">${rowBuckets.map(b=>`<div class="bar-label" style="flex:1;">${b.label}</div>`).join('')}</div>`;
@@ -2843,6 +2851,7 @@ function renderCompareHistoryChart(){
   const dateSet = new Set();
   allOrders.forEach(o=>o.date && dateSet.add(o.date));
   allExpenses.forEach(e=>e.date && dateSet.add(e.date));
+  DB.get('adExpenses').forEach(a=>a.date&&dateSet.add(a.date));
 
   if(!dateSet.size){
     chartEl.innerHTML='';
@@ -2864,15 +2873,15 @@ function renderCompareHistoryChart(){
   }
 
   days.forEach(b=>{
-    b.sales = allOrders.filter(o=>o.date===b.date).reduce((s,o)=>s+o.total,0);
+    b.sales = money2(allOrders.filter(o=>o.date===b.date).reduce((s,o)=>s+orderAfterGp(o),0)-DB.get('adExpenses').filter(a=>a.date===b.date).reduce((s,a)=>s+a.amount,0));
     b.exp = allExpenses.filter(e=>e.date===b.date).reduce((s,e)=>s+e.amount,0);
   });
 
-  const max = Math.max(...days.map(b=>Math.max(b.sales,b.exp)), 1);
+  const max = Math.max(...days.map(b=>Math.max(Math.abs(b.sales),b.exp)), 1);
 
   chartEl.innerHTML = days.map(b=>`
     <div class="chh-group">
-      <div class="bar-sales" style="height:${Math.max(3,b.sales/max*150)}px;" title="ยอดขาย ${b.label}: ฿${b.sales.toLocaleString()}">${b.sales>0?`<span class="bar-val v-sales">${fmtCompact(b.sales)}</span>`:''}</div>
+      <div class="bar-sales" style="height:${Math.max(3,Math.abs(b.sales)/max*150)}px;background:${b.sales<0?'var(--red)':'var(--sage)'};" title="ยอดขายสุทธิ ${b.label}: ฿${b.sales.toLocaleString()}">${b.sales!==0?`<span class="bar-val v-sales">${fmtCompact(b.sales)}</span>`:''}</div>
       <div class="bar-expense" style="height:${Math.max(3,b.exp/max*150)}px;" title="รายจ่าย ${b.label}: ฿${b.exp.toLocaleString()}">${b.exp>0?`<span class="bar-val v-expense">${fmtCompact(b.exp)}</span>`:''}</div>
     </div>`).join('');
   labelEl.innerHTML = days.map(b=>`<div class="chh-label">${b.label}</div>`).join('');
@@ -2900,29 +2909,31 @@ function renderCompareHistoryChart(){
 }
 
 // Breakdown of sales by order channel/type (หน้าร้าน / Grab / LINE MAN)
-function renderSalesByType(orders){
+function renderSalesByType(orders,ads=[]){
   const tbody = document.getElementById('salesByTypeTable');
   if(!tbody) return;
   const types = [
-    {label:'หน้าร้าน', match:o=>!o.type||o.type==='instore'},
-    {label:'Grab', match:o=>o.type==='grab'},
-    {label:'LINE MAN', match:o=>o.type==='lineman'}
+    {key:'instore',label:'หน้าร้าน', match:o=>!o.type||o.type==='instore'},
+    {key:'grab',label:'Grab', match:o=>o.type==='grab'},
+    {key:'lineman',label:'LINE MAN', match:o=>o.type==='lineman'}
   ];
   const total = orders.reduce((s,o)=>s+o.total,0);
   const rows = types.map(t=>{
     const list = orders.filter(t.match);
     const sum = list.reduce((s,o)=>s+o.total,0);
     const avg = list.length>0 ? Math.round(sum/list.length) : 0;
-    return {label:t.label, ads:list.filter(o=>o.isAdvertisement).length, count:list.length, sum, avg, pct: total>0?Math.round(sum/total*100):0};
+    const gpSum=money2(list.reduce((s,o)=>s+getOrderGpAmount(o,DB.get('gpSettings',{})),0)),adCost=money2(ads.filter(a=>a.channel===t.key).reduce((s,a)=>s+a.amount,0));
+    return {gpSum,adCost,net:money2(sum-gpSum-adCost),label:t.label, ads:list.filter(o=>o.isAdvertisement).length, count:list.length, sum, avg, pct: total>0?Math.round(sum/total*100):0};
   });
-  if(!orders.length){
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
+  if(!orders.length&&!ads.length){
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r=>`<tr>
     <td>${r.label}</td>
     <td>${r.count}</td><td>${r.ads}</td>
     <td style="font-weight:600;">฿${r.sum.toLocaleString()}</td>
+    <td>฿${r.gpSum.toLocaleString()}</td><td>฿${r.adCost.toLocaleString()}</td><td>฿${r.net.toLocaleString()}</td>
     <td>฿${r.avg.toLocaleString()}</td>
     <td>
       <div style="display:flex;align-items:center;gap:6px;">
@@ -3074,7 +3085,7 @@ function renderExpByCat(expenses){
 // ให้ประมาณจาก % GP ปัจจุบันในหน้าตั้งค่าตามช่องทางแทน
 function getOrderGpAmount(o, gp) {
   if(o.gpAmount!=null) return o.gpAmount;
-  const pct = gp[o.type] ?? 0;
+  const pct = o.gpPct ?? gp[o.type] ?? 0;
   return Math.round(o.total*pct/100*100)/100;
 }
 
@@ -3116,7 +3127,9 @@ function renderProfitReport(){
 
   const revenue = orders.reduce((s,o)=>s+o.total,0);
   const gpAmountTotal = channels.reduce((s,ch)=>s+byChannel[ch].gpAmount,0);
-  const netRevenueTotal = revenue - gpAmountTotal;
+  const ads = getPeriodAds(period,refKey);
+  const adTotal=money2(ads.reduce((s,a)=>s+a.amount,0));
+  const netRevenueTotal = money2(revenue - gpAmountTotal - adTotal);
   const profit = netRevenueTotal-cost; // กำไรขั้นต้นหลังหัก GP แล้ว (ต้นทุนคำนวณจากราคาวัตถุดิบปัจจุบัน)
   const gpPctOfRevenue = revenue>0?Math.round(profit/revenue*100):0;
   const expenses = getAllExpenses().filter(e=>dateMatchesPeriod(e.date, period, refKey));
@@ -3128,27 +3141,29 @@ function renderProfitReport(){
     <div class="stat-card"><div class="stat-label">รายได้รวม</div><div class="stat-value">฿${revenue.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ค่า GP ที่ถูกหัก</div><div class="stat-value red">฿${gpAmountTotal.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">ต้นทุนสินค้า <span style="font-weight:400;font-size:0.7rem;">(ราคาวัตถุดิบล่าสุด)</span></div><div class="stat-value red">฿${cost.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="stat-label">กำไรขั้นต้น (หลังหัก GP)</div><div class="stat-value ${profit>=0?'green':'red'}">฿${profit.toLocaleString()} (${gpPctOfRevenue}%)</div></div>
+    <div class="stat-card"><div class="stat-label">กำไรหลังหักต้นทุน GP และโฆษณา</div><div class="stat-value ${profit>=0?'green':'red'}">฿${profit.toLocaleString()} (${gpPctOfRevenue}%)</div></div>
     <div class="stat-card"><div class="stat-label">ยอดรายจ่าย</div><div class="stat-value red">฿${expTotal.toLocaleString()}</div></div>
     <div class="stat-card"><div class="stat-label">กำไรสุทธิ (หลังหักรายจ่าย)</div><div class="stat-value ${netProfit>=0?'green':'red'}">฿${netProfit.toLocaleString()}</div></div>
   `;
 
+  document.getElementById('profitStatCards').insertAdjacentHTML('beforeend',`<div class="stat-card"><div class="stat-label">ค่าโฆษณา</div><div class="stat-value red">฿${adTotal.toLocaleString()}</div></div><div class="stat-card"><div class="stat-label">ยอดขายสุทธิ (หลังส่วนลด GP และโฆษณา)</div><div class="stat-value">฿${netRevenueTotal.toLocaleString()}</div></div>`);
   const chTbody = document.getElementById('profitChannelTable');
   const chRows = channels.map(ch=>{
     const c = byChannel[ch];
-    const net = c.revenue - c.gpAmount;
+    const adCost=money2(ads.filter(a=>a.channel===ch).reduce((s,a)=>s+a.amount,0));
+    const net = money2(c.revenue - c.gpAmount - adCost);
     const chProfit = net - c.cost;
     const chPct = c.revenue>0 ? Math.round(chProfit/c.revenue*100) : 0;
-    return {ch, ...c, net, chProfit, chPct};
-  }).filter(r=>r.revenue>0);
+    return {ch, ...c, adCost, net, chProfit, chPct};
+  }).filter(r=>r.revenue>0||r.adCost>0);
   if(!chRows.length){
-    chTbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
+    chTbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีข้อมูล</td></tr>`;
   } else {
     chTbody.innerHTML = chRows.map(r=>`<tr>
       <td style="font-weight:600;">${channelLabel[r.ch]}${r.estimated?' <span class="pill pill-gold" style="font-size:0.65rem;">ประมาณการ</span>':''}</td>
       <td>฿${r.revenue.toLocaleString()}</td>
       <td style="color:var(--red);">฿${r.gpAmount.toLocaleString()}</td>
-      <td>฿${r.net.toLocaleString()}</td>
+      <td style="color:var(--red);">฿${r.adCost.toLocaleString()}</td><td>฿${r.net.toLocaleString()}</td>
       <td style="color:var(--red);">฿${r.cost.toLocaleString()}</td>
       <td style="font-weight:700;color:${r.chProfit>=0?'var(--sage)':'var(--red)'};">฿${r.chProfit.toLocaleString()}</td>
       <td><span class="pill ${r.chPct>=30?'pill-green':r.chPct>=10?'pill-gold':'pill-red'}">${r.chPct}%</span></td>
@@ -3771,7 +3786,7 @@ const BACKUP_CORE_KEYS = {
   customers:'ลูกค้า', customerTypes:'ประเภทลูกค้า', expenses:'รายจ่าย', promotions:'โปรโมชั่น'
 };
 // Keys that are only created once the operator actually uses that feature — fine to be absent.
-const BACKUP_OPTIONAL_KEYS = { expenseCategories:'หมวดหมู่รายจ่าย', salespeople:'พนักงานขาย' };
+const BACKUP_OPTIONAL_KEYS = { expenseCategories:'หมวดหมู่รายจ่าย', salespeople:'พนักงานขาย', adExpenses:'ค่าโฆษณา' };
 // Singleton images now live in IndexedDB rather than localStorage.
 const BACKUP_IMAGE_KEYS = { shopLogo:'โลโก้ร้าน', posQrImage:'QR หน้าขาย', receiptQrImage:'QR ในใบเสร็จ' };
 
@@ -4030,10 +4045,10 @@ function safeStaffText(v) { return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;'
 function orderCommission(o) {
   if(o.status==='cancelled'||!o.salesperson) return 0;
   const rate = Math.max(0,Number(o.salesperson.rate)||0);
-  // o.total already includes the order discount; subtract GP only once.
+  // Discount is already included in total; subtract GP and allocated advertising once.
   const gp = DB.get('gpSettings', {instore:0,grab:32.1,lineman:32.1});
   const gpAmount = Number(o.gpAmount ?? (o.gpPct != null ? money2(o.total*o.gpPct/100) : getOrderGpAmount(o,gp)));
-  const commissionBase = Math.max(0,money2(Number(o.total)-gpAmount));
+  const commissionBase = Math.max(0,money2(Number(o.total)-gpAmount-getOrderAdCost(o)));
   return money2(o.salesperson.commissionType==='pct' ? commissionBase*rate/100 : rate);
 }
 function getAllExpenses() {
@@ -4109,7 +4124,7 @@ function removeSalesperson(id) {
   if(!editingOrderId&&selectedSalesperson?.id===id)selectedSalesperson=null;renderStaffControls();
 }
 function renderStaffSummary(orders) {
-  const groups=new Map();orders.forEach(o=>{const key=o.salesperson?.id??'none';if(!groups.has(key))groups.set(key,{name:o.salesperson?.name||'ไม่ระบุพนักงาน',count:0,ads:0,total:0,commission:0});const g=groups.get(key);g.count++;g.ads+=o.isAdvertisement?1:0;g.total+=o.total;g.commission+=orderCommission(o);});
+  const groups=new Map();orders.forEach(o=>{const key=o.salesperson?.id??'none';if(!groups.has(key))groups.set(key,{name:o.salesperson?.name||'ไม่ระบุพนักงาน',count:0,ads:0,total:0,commission:0});const g=groups.get(key);g.count++;g.ads+=o.isAdvertisement?1:0;g.total+=orderNetSales(o);g.commission+=orderCommission(o);});
   const el=document.getElementById('staffSalesSummary');if(el)el.innerHTML=[...groups.values()].map(g=>`<tr><td>${safeStaffText(g.name)}</td><td>${g.count}</td><td>${g.ads}</td><td>฿${money2(g.total).toLocaleString()}</td><td>฿${money2(g.commission).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan="5">ไม่มีข้อมูล</td></tr>';
 }
 function updateOrderDiscount(id,value) {
@@ -4221,3 +4236,50 @@ async function saveAIReviewedOrder(){if(aiBusy)return;const button=document.getE
   const order=navigator.locks?await navigator.locks.request('longdo-ai-import',perform):perform();
   aiDraft=null;aiImageData='';aiImageHash='';closeModal('aiImportModal');showPage('orders');showToast('บันทึกออเดอร์ #'+order.orderNo+' และยอดลูกค้าแล้ว','success');
 }catch(e){aiMessage(e.message,true);if(/ลูกค้า/.test(e.message))matchAICustomer();}finally{aiBusy=false;button.disabled=false;}}
+
+// Phase 8: advertising is a revenue deduction, not an operating expense.
+function adChannelLabel(ch){return {instore:'หน้าร้าน',grab:'Grab',lineman:'LINE MAN'}[ch]||ch;}
+function orderAfterGp(o,gp=DB.get('gpSettings',{instore:0,grab:32.1,lineman:32.1})){
+  const fee=Number(o.gpAmount??(o.gpPct!=null?money2(o.total*o.gpPct/100):getOrderGpAmount(o,gp)));
+  return money2(Number(o.total)-fee);
+}
+function buildAdAllocation(orders,ads,gp){
+  const allocations=new Map(),groups=new Map();
+  ads.forEach(a=>{const key=a.date+'|'+a.channel;groups.set(key,(groups.get(key)||0)+Math.round(Number(a.amount)*100));});
+  const unallocated=[];
+  for(const [key,cents] of groups){
+    const [date,channel]=key.split('|');
+    const eligible=orders.filter(o=>o.date===date&&(o.type||'instore')===channel&&o.status!=='cancelled'&&o.isAdvertisement).map(o=>({id:o.id,base:Math.max(0,Math.round(orderAfterGp(o,gp)*100))})).filter(o=>o.base>0).sort((a,b)=>Number(a.id)-Number(b.id));
+    const baseTotal=eligible.reduce((s,o)=>s+o.base,0);
+    if(!baseTotal){unallocated.push({date,channel,amount:cents/100});continue;}
+    const parts=eligible.map(o=>{const exact=cents*o.base/baseTotal;return {...o,cents:Math.floor(exact),remainder:exact-Math.floor(exact)};});
+    let leftover=cents-parts.reduce((s,o)=>s+o.cents,0);const ranked=parts.slice().sort((a,b)=>b.remainder-a.remainder||Number(a.id)-Number(b.id));
+    for(let n=0;n<leftover;n++)ranked[n%ranked.length].cents++;
+    parts.forEach(o=>allocations.set(o.id,o.cents/100));
+  }
+  return {allocations,unallocated};
+}
+let adAllocationCache={signature:null,result:null};
+function getAdAllocation(){const signature=['orders','adExpenses','gpSettings'].map(k=>localStorage.getItem('ld_'+k)||'').join('\u0000');if(signature!==adAllocationCache.signature){adAllocationCache={signature,result:buildAdAllocation(DB.get('orders'),DB.get('adExpenses'),DB.get('gpSettings',{instore:0,grab:32.1,lineman:32.1}))};}return adAllocationCache.result;}
+function getOrderAdCost(o){return getAdAllocation().allocations.get(o.id)||0;}
+function orderNetSales(o){return money2(orderAfterGp(o)-getOrderAdCost(o));}
+function getPeriodAds(period,key){return DB.get('adExpenses').filter(a=>dateMatchesPeriod(a.date,period,key));}
+let editingAdId=null;
+function openAdExpense(id=null){const a=id==null?null:DB.get('adExpenses').find(a=>a.id===id);editingAdId=a?.id??null;document.getElementById('adDate').value=a?.date||today();document.getElementById('adChannel').value=a?.channel||'grab';document.getElementById('adName').value=a?.name||'';document.getElementById('adAmount').value=a?.amount??'';document.getElementById('adNote').value=a?.note||'';document.getElementById('adSaveStatus').textContent='';openModal('adExpenseModal');}
+function saveAdExpense(){
+  try{const date=document.getElementById('adDate').value,channel=document.getElementById('adChannel').value,name=document.getElementById('adName').value.trim(),raw=document.getElementById('adAmount').value,amount=Number(raw),note=document.getElementById('adNote').value.trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||!['instore','grab','lineman'].includes(channel)||!name||raw===''||!Number.isFinite(amount)||money2(amount)<=0)throw Error('กรอกวันที่ ช่องทาง ชื่อรายการ และจำนวนเงินมากกว่า 0 ให้ครบ');
+    const rows=DB.get('adExpenses'),id=editingAdId??Math.max(Date.now(),...rows.map(a=>Number(a.id)+1));const entry={id,date,channel,name,amount:money2(amount),note};
+    if(editingAdId!=null&&!rows.some(a=>a.id===editingAdId))throw Error('รายการนี้ถูกลบแล้ว กรุณาเปิดใหม่');
+    const next=editingAdId==null?[...rows,entry]:rows.map(a=>a.id===id?entry:a);if(!DB.set('adExpenses',next))return;
+    closeModal('adExpenseModal');renderExpTable();showToast('บันทึกค่าโฆษณาและคำนวณค่าคอมมิชชั่นใหม่แล้ว','success');
+  }catch(e){document.getElementById('adSaveStatus').textContent=e.message;}
+}
+function deleteAdExpense(id){if(!confirm('ลบค่าโฆษณารายการนี้? ยอดขายสุทธิและคอมมิชชั่นจะคำนวณใหม่'))return;if(DB.set('adExpenses',DB.get('adExpenses').filter(a=>a.id!==id)))renderExpTable();}
+function renderAdExpenses(period,key){
+  const ads=key?getPeriodAds(period,key):DB.get('adExpenses');const total=money2(ads.reduce((s,a)=>s+a.amount,0));
+  const missing=getAdAllocation().unallocated.filter(a=>!key||dateMatchesPeriod(a.date,period,key));
+  document.getElementById('adPeriodTotal').textContent=`ค่าโฆษณารวม ฿${total.toLocaleString()} — แยกจากรายจ่ายทั่วไป`;
+  document.getElementById('adAllocationNote').textContent=missing.length?'ยังไม่มีออเดอร์โฆษณาที่มียอดหลัง GP เป็นบวกสำหรับ: '+missing.map(a=>`${a.date} ${adChannelLabel(a.channel)} ฿${a.amount}`).join(', ')+' ค่าโฆษณายังคงหักจากยอดสุทธิรวม แต่ยังไม่แบ่งให้พนักงาน':'';
+  document.getElementById('adExpenseTable').innerHTML=ads.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).map(a=>`<tr><td>${a.date}</td><td>${safeStaffText(a.name)}</td><td>${adChannelLabel(a.channel)}</td><td>฿${a.amount.toLocaleString()}</td><td>${safeStaffText(a.note||'—')}</td><td><button class="btn btn-ghost btn-sm" onclick="openAdExpense(${a.id})">แก้ไข</button> <button class="btn btn-danger btn-sm" onclick="deleteAdExpense(${a.id})">ลบ</button></td></tr>`).join('')||'<tr><td colspan="6">ไม่มีค่าโฆษณา</td></tr>';
+}

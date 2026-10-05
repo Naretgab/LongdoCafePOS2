@@ -140,7 +140,7 @@ const SyncEngine = (() => {
   };
 
   // ── singleton settings: whole-object upsert into one "settings" table ──
-  const SETTINGS_KEYS = ['shopInfo', 'gpSettings', 'printerSettings', 'expenseCategories', 'salespeople', 'orderSeq'];
+  const SETTINGS_KEYS = ['shopInfo', 'gpSettings', 'printerSettings', 'expenseCategories', 'salespeople', 'adExpenses', 'orderSeq'];
 
   const QUEUE_KEY = 'ld_syncQueue';
   const SNAP_PREFIX = 'ld_syncSnapshot_';

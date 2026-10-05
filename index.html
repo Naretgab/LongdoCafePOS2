@@ -1187,6 +1187,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
           <button class="btn btn-ghost" onclick="openCatManageModal()">🏷️ จัดการหมวดหมู่</button>
           <button class="btn btn-primary" onclick="openExpenseModal()">+ บันทึกรายจ่าย</button>
+          <button class="btn btn-primary" onclick="openAdExpense()">📣 บันทึกค่าโฆษณา</button>
         </div>
         <div class="tabs" style="flex-wrap:wrap;">
           <button class="tab-btn active" onclick="switchReportTab('all','expenses')">ทั้งหมด</button>
@@ -1219,6 +1220,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
             </table>
           </div>
         </div>
+        <div class="card" style="margin-top:16px;"><div class="card-title">📣 ค่าโฆษณา (หักจากยอดขายสุทธิ)</div><p>แบ่งตามยอดหลัง GP เฉพาะออเดอร์โฆษณาในวันและช่องทางเดียวกัน</p><div id="adPeriodTotal"></div><p id="adAllocationNote" style="color:var(--caramel);"></p><div class="table-wrap"><table><thead><tr><th>วันที่</th><th>รายการ</th><th>ช่องทาง</th><th>ค่าโฆษณา</th><th>หมายเหตุ</th><th></th></tr></thead><tbody id="adExpenseTable"></tbody></table></div></div>
       </div>
     </div>
 
@@ -1253,17 +1255,17 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
           </div>
           <div id="compareChartContainer"></div>
           <div class="chart-legend">
-            <span><span class="dot" style="background:var(--sage);"></span>ยอดขาย</span>
+            <span><span class="dot" style="background:var(--sage);"></span>ยอดขายสุทธิ (ค่าติดลบเป็นสีแดง)</span>
             <span><span class="dot" style="background:var(--red);"></span>รายจ่าย</span>
             <span id="compareNet" style="margin-left:auto;font-weight:600;"></span>
           </div>
         </div>
-        <div class="card" style="margin-top:16px;"><div class="card-title">ยอดขายและค่าคอมมิชชั่นแยกพนักงาน</div><div class="table-wrap"><table><thead><tr><th>พนักงาน</th><th>ออเดอร์</th><th>โฆษณา</th><th>ยอดหลังส่วนลด</th><th>ค่าคอมมิชชั่น</th></tr></thead><tbody id="staffSalesSummary"></tbody></table></div></div>
+        <div class="card" style="margin-top:16px;"><div class="card-title">ยอดขายและค่าคอมมิชชั่นแยกพนักงาน</div><div class="table-wrap"><table><thead><tr><th>พนักงาน</th><th>ออเดอร์</th><th>โฆษณา</th><th>ยอดสุทธิหลังส่วนลด GP และโฆษณา</th><th>ค่าคอมมิชชั่น</th></tr></thead><tbody id="staffSalesSummary"></tbody></table></div></div>
         <div class="grid-3" style="margin-top:16px;">
           <div class="card">
             <div class="card-header"><div class="card-title">ยอดขายแยกตามประเภท</div></div>
             <div class="table-wrap">
-              <table><thead><tr><th>ประเภท</th><th>ออเดอร์</th><th>โฆษณา (ออเดอร์)</th><th>ยอดขาย</th><th>เฉลี่ย/บิล</th><th>สัดส่วน</th></tr></thead>
+              <table><thead><tr><th>ประเภท</th><th>ออเดอร์</th><th>โฆษณา (ออเดอร์)</th><th>ยอดขาย</th><th>GP</th><th>ค่าโฆษณา</th><th>ยอดขายสุทธิ</th><th>เฉลี่ย/บิล</th><th>สัดส่วน</th></tr></thead>
               <tbody id="salesByTypeTable"></tbody></table>
             </div>
           </div>
@@ -1293,7 +1295,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         <div class="card" style="margin-top:16px;">
           <div class="card-header"><div class="card-title">รายการออเดอร์</div></div>
           <div class="table-wrap">
-            <table><thead><tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>ประเภท</th><th>ยอด</th><th>ส่วนลด</th><th>สุทธิ</th><th>หัก GP</th><th>ร้านได้รับจริง</th></tr></thead>
+            <table><thead><tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>ประเภท</th><th>ยอด</th><th>ส่วนลด</th><th>หลังส่วนลด</th><th>หัก GP</th><th>โฆษณาที่แบ่งให้ออเดอร์</th><th>ยอดขายสุทธิ</th></tr></thead>
             <tbody id="salesReportTable"></tbody></table>
           </div>
         </div>
@@ -1322,7 +1324,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         <div class="card" style="margin-top:16px;">
           <div class="card-header"><div class="card-title">กำไรแยกตามช่องทาง</div></div>
           <div class="table-wrap">
-            <table><thead><tr><th>ช่องทาง</th><th>ยอดขาย</th><th>หัก GP</th><th>ยอดสุทธิ</th><th>ต้นทุนวัตถุดิบ</th><th>กำไรขั้นต้น</th><th>%กำไร</th></tr></thead>
+            <table><thead><tr><th>ช่องทาง</th><th>ยอดขาย</th><th>หัก GP</th><th>ค่าโฆษณา</th><th>ยอดขายสุทธิ</th><th>ต้นทุนวัตถุดิบ</th><th>กำไรขั้นต้น</th><th>%กำไร</th></tr></thead>
             <tbody id="profitChannelTable"></tbody></table>
           </div>
           <div id="profitGpEstimateNote" style="font-size:0.75rem;color:var(--muted);padding:8px 16px;display:none;">* ออเดอร์เก่าบางรายการไม่มีข้อมูล GP ที่ใช้จริงตอนขาย ระบบใช้ % GP ปัจจุบันจากหน้าตั้งค่าแทน (ประมาณการ)</div>
@@ -1371,7 +1373,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
         <div class="grid-2">
           <div class="card">
             <div class="card-header"><div class="card-title">👤 พนักงานขายและค่าคอมมิชชั่น</div></div>
-            <p>เปอร์เซ็นต์คิดจากยอดหลังหักส่วนลดและ GP หรือเลือกบาทต่อออเดอร์ อัตราที่เปลี่ยนมีผลกับการขายครั้งถัดไปเท่านั้น</p>
+            <p>เปอร์เซ็นต์คิดจากยอดขายสุทธิหลังหักส่วนลด GP และค่าโฆษณาที่แบ่งให้ออเดอร์ หรือเลือกบาทต่อออเดอร์ อัตราที่เปลี่ยนมีผลกับการขายครั้งถัดไปเท่านั้น</p>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <input class="form-control" id="staffName" placeholder="ชื่อพนักงาน" aria-label="ชื่อพนักงาน">
               <select class="form-control" id="staffCommissionType"><option value="pct">เปอร์เซ็นต์ (%)</option><option value="thb">บาทต่อออเดอร์</option></select>
@@ -1828,12 +1830,12 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
       <div class="compare-history-labels" id="compareHistoryLabels"></div>
     </div>
     <div class="chart-legend">
-      <span><span class="dot" style="background:var(--sage);"></span>ยอดขาย</span>
+      <span><span class="dot" style="background:var(--sage);"></span>ยอดขายสุทธิ (ค่าติดลบเป็นสีแดง)</span>
       <span><span class="dot" style="background:var(--red);"></span>รายจ่าย</span>
       <span id="compareHistoryNet" style="margin-left:auto;font-weight:600;"></span>
     </div>
     <div class="table-wrap" style="margin-top:16px;max-height:280px;">
-      <table><thead><tr><th>วันที่</th><th>ยอดขาย</th><th>รายจ่าย</th><th>สุทธิ</th></tr></thead>
+      <table><thead><tr><th>วันที่</th><th>ยอดขายสุทธิ</th><th>รายจ่าย</th><th>สุทธิ</th></tr></thead>
       <tbody id="compareHistoryTable"></tbody></table>
     </div>
     <div class="modal-footer">
@@ -2070,8 +2072,10 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   </div></div>
 </div></div>
 
+<div class="modal-overlay" id="adExpenseModal"><div class="modal"><div class="modal-header"><h3>บันทึกค่าโฆษณา</h3><button class="btn btn-ghost" onclick="closeModal('adExpenseModal')">✕</button></div>
+<label>วันที่ลงโฆษณา<input class="form-control" type="date" id="adDate"></label><label>ช่องทาง<select class="form-control" id="adChannel"><option value="instore">หน้าร้าน</option><option value="grab">Grab</option><option value="lineman">LINE MAN</option></select></label><label>ชื่อรายการ<input class="form-control" id="adName" placeholder="เช่น โฆษณา Grab"></label><label>จำนวนเงิน (บาท)<input class="form-control" type="number" min="0.01" step="0.01" id="adAmount"></label><label>หมายเหตุ<input class="form-control" id="adNote"></label><p>ค่าโฆษณาจะหักจากยอดขายสุทธิ และแบ่งเฉพาะออเดอร์ที่ติ๊กโฆษณาในวันและช่องทางนี้ กรณีครอบคลุมหลายวันให้บันทึกแยกแต่ละวัน</p><div id="adSaveStatus" role="status" style="color:var(--red);"></div><button class="btn btn-primary" onclick="saveAdExpense()">บันทึกค่าโฆษณา</button></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="supabase-sync.js?v=29"></script>
-<script src="app.js?v=29"></script>
+<script src="supabase-sync.js?v=30"></script>
+<script src="app.js?v=30"></script>
 </body>
 </html>
