@@ -1019,6 +1019,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     <div id="page-orders" class="page">
       <div class="content">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+          <button class="btn btn-primary" type="button" onclick="openAIImport()">📷 อ่านออเดอร์จากภาพด้วย GPT</button>
           <div class="tabs" id="ordersTypeTabs" style="flex-wrap:wrap;"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <input type="date" class="form-control" style="width:auto;" id="ordersDate">
@@ -1372,13 +1373,20 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
             <div class="card-header"><div class="card-title">👤 พนักงานขายและค่าคอมมิชชั่น</div></div>
             <p>เปอร์เซ็นต์คิดจากยอดหลังหักส่วนลดและ GP หรือเลือกบาทต่อออเดอร์ อัตราที่เปลี่ยนมีผลกับการขายครั้งถัดไปเท่านั้น</p>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <input id="staffName" placeholder="ชื่อพนักงาน" aria-label="ชื่อพนักงาน">
-              <select id="staffCommissionType"><option value="pct">เปอร์เซ็นต์ (%)</option><option value="thb">บาทต่อออเดอร์</option></select>
-              <input id="staffCommissionRate" type="number" min="0" step="0.01" value="0" aria-label="อัตราคอมมิชชั่น" style="width:100px;">
-              <button class="btn btn-primary" onclick="addSalesperson()">เพิ่มพนักงาน</button>
+              <input class="form-control" id="staffName" placeholder="ชื่อพนักงาน" aria-label="ชื่อพนักงาน">
+              <select class="form-control" id="staffCommissionType"><option value="pct">เปอร์เซ็นต์ (%)</option><option value="thb">บาทต่อออเดอร์</option></select>
+              <input class="form-control" id="staffCommissionRate" type="number" min="0" step="0.01" value="0" aria-label="อัตราคอมมิชชั่น" style="width:100px;">
+              <button type="button" id="staffSaveButton" class="btn btn-primary" onclick="addSalesperson()">💾 บันทึกพนักงาน</button>
             </div>
+            <div id="staffSaveStatus" role="status" aria-live="polite" style="margin-top:10px;font-size:0.85rem;"></div>
             <div id="staffList" class="table-wrap" style="margin-top:12px;"></div>
           </div>
+          <div class="card"><div class="card-title">เชื่อมต่อ GPT อ่านออเดอร์</div>
+          <p>API key ตั้งไว้บน Supabase เท่านั้น กรอก URL ฟังก์ชันและรหัสเชื่อมต่อที่ผู้ดูแลกำหนด</p>
+          <label>URL ฟังก์ชัน<input class="form-control" id="aiEndpoint" placeholder="https://PROJECT.supabase.co/functions/v1/pos-read-order"></label>
+          <label>รหัสเชื่อมต่อ AI<input class="form-control" id="aiAccessToken" type="password" autocomplete="off"></label>
+          <p>รหัสเชื่อมต่อเก็บเฉพาะแท็บนี้ ปิดแท็บแล้วต้องกรอกใหม่</p>
+          <button class="btn btn-primary" type="button" onclick="saveAIConnection()">บันทึกการเชื่อมต่อ</button><div id="aiConnectionStatus" role="status"></div></div>
           <!-- Data Backup -->
           <div class="card">
             <div class="card-header"><div class="card-title">🗄️ สำรอง / นำเข้าข้อมูล</div></div>
@@ -2029,8 +2037,41 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   </div>
 </div>
 
+
+<div class="modal-overlay" id="aiImportModal"><div class="modal" style="max-width:1000px;width:95vw;max-height:90vh;overflow:auto;">
+  <div class="modal-header"><h3>อ่านออเดอร์จากภาพ — ตรวจแล้วบันทึก</h3><button type="button" class="btn btn-ghost" onclick="closeModal('aiImportModal')">✕</button></div>
+  <div class="modal-body">
+  <p>ภาพจะถูกส่งให้ OpenAI อ่าน ตรวจทุกรายการก่อนยืนยันเป็นยอดขายสำเร็จ</p>
+  <input id="aiImageFile" type="file" accept="image/jpeg,image/png,image/webp" onchange="selectAIImage(this.files[0])">
+  <img id="aiImagePreview" alt="ภาพออเดอร์" style="display:none;max-width:100%;max-height:300px;object-fit:contain;margin:10px 0;">
+  <button type="button" id="aiReadButton" class="btn btn-primary" onclick="readAIImage()">ให้ GPT อ่านภาพ</button>
+  <div id="aiImportStatus" role="status" aria-live="polite" style="margin:10px 0;white-space:pre-wrap;"></div>
+  <div id="aiOrderReview" style="display:none;">
+    <div class="grid-2">
+      <label>ชื่อลูกค้า<input class="form-control" id="aiCustomerName" oninput="matchAICustomer()"></label>
+      <label>เบอร์โทร (ถ้ามี)<input class="form-control" id="aiCustomerPhone" oninput="matchAICustomer()"></label>
+      <label>เลือกลูกค้า<select class="form-control" id="aiCustomerMatch"></select><small id="aiCustomerHint"></small></label>
+      <label>เลขอ้างอิง<input class="form-control" id="aiOrderRef"></label>
+      <label>ช่องทาง<select class="form-control" id="aiOrderChannel" onchange="setAIGpDefault()"><option value="">เลือกช่องทาง</option><option value="instore">หน้าร้าน</option><option value="grab">Grab</option><option value="lineman">LINE MAN</option></select></label>
+      <label>วันที่ออเดอร์<input type="date" class="form-control" id="aiOrderDate"></label>
+      <label>เวลาออเดอร์<input type="time" class="form-control" id="aiOrderTime"></label>
+      <label>วิธีรับชำระ<select class="form-control" id="aiOrderPay"><option value="">เลือกวิธีรับชำระ</option><option value="platform">แพลตฟอร์มจัดการชำระ</option><option value="qr">QR / โอนเงิน</option><option value="cash">เงินสด (รับพอดี)</option></select></label>
+      <label>GP (%)<input type="number" min="0" max="100" step="0.01" class="form-control" id="aiOrderGp" oninput="updateAIReviewTotals()"></label>
+      <label>พนักงานขาย<select class="form-control" id="aiOrderStaff"></select></label>
+      <label><input type="checkbox" id="aiOrderAd"> ออเดอร์จากโฆษณา</label>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>ชื่อที่อ่านได้</th><th>เมนูใน POS</th><th>จำนวน</th><th>ราคา/ชิ้น</th><th>ตัวเลือก/หมายเหตุ</th><th></th></tr></thead><tbody id="aiReviewItems"></tbody></table></div>
+    <button type="button" class="btn btn-ghost" onclick="addAIReviewItem()">เพิ่มรายการ</button>
+    <label>ส่วนลดรวม (บาท)<input class="form-control" id="aiOrderDiscount" type="number" min="0" step="0.01" oninput="updateAIReviewTotals()"></label>
+    <label>หมายเหตุออเดอร์<textarea class="form-control" id="aiOrderNotes"></textarea></label>
+    <div id="aiReviewTotals" style="margin:12px 0;white-space:pre-wrap;"></div>
+    <label><input type="checkbox" id="aiOrderConfirmed"> ตรวจข้อมูลครบแล้ว และยืนยันว่าออเดอร์นี้ขายสำเร็จ/ชำระแล้ว</label>
+    <div style="margin-top:12px;"><button id="aiSaveOrderButton" type="button" class="btn btn-primary" onclick="saveAIReviewedOrder()">ยืนยันบันทึกออเดอร์</button></div>
+  </div></div>
+</div></div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="supabase-sync.js"></script>
-<script src="app.js"></script>
+<script src="supabase-sync.js?v=28"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>

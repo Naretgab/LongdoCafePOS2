@@ -37,6 +37,7 @@ const SyncEngine = (() => {
       status: o.status, received: o.received, change: o.change,
       gp_pct: o.gpPct ?? null, gp_amount: o.gpAmount ?? null, net_revenue: o.netRevenue ?? null,
       salesperson: o.salesperson || null, is_advertisement: !!o.isAdvertisement,
+      import_hash:o.importHash||null, import_source:o.importSource||null, import_notes:o.importNotes||null,
       updated_at: new Date().toISOString(),
     };
   }
@@ -49,6 +50,7 @@ const SyncEngine = (() => {
       status: r.status, received: r.received, change: r.change,
       gpPct: r.gp_pct, gpAmount: r.gp_amount, netRevenue: r.net_revenue,
       salesperson: r.salesperson || null, isAdvertisement: !!r.is_advertisement,
+      importHash:r.import_hash||null, importSource:r.import_source||null, importNotes:r.import_notes||'',
     };
   }
   function customerToRow(c) {

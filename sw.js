@@ -1,11 +1,11 @@
 // Long Do POS — Service Worker
 // ⚠️ เปลี่ยนเลขเวอร์ชันนี้ทุกครั้งที่แก้ไข app.js / index.html เพื่อบังคับอัปเดตแอป
-const CACHE = 'longdo-pos-v26';
+const CACHE = 'longdo-pos-v28';
 const ASSETS = [
   './',
   './index.html',
-  './app.js',
-  './supabase-sync.js',
+  './app.js?v=28',
+  './supabase-sync.js?v=28',
   './manifest.json',
   'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Sarabun:wght@300;400;500;600&display=swap',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
@@ -37,7 +37,7 @@ self.addEventListener('fetch', e => {
   // ไม่ต้อง cache หรือ intercept ใดๆ — ให้เบราว์เซอร์จัดการเองตามปกติ
   if (e.request.url.includes('.supabase.co')) return;
 
-  const isCore = e.request.destination === 'document' || e.request.url.endsWith('app.js') || e.request.url.endsWith('supabase-sync.js');
+  const isCore = e.request.destination === 'document' || new URL(e.request.url).pathname.endsWith('/app.js') || new URL(e.request.url).pathname.endsWith('/supabase-sync.js');
 
   if (isCore) {
     e.respondWith(

@@ -276,7 +276,7 @@ function showPage(name) {
   if(name==='report-sales') renderSalesReport();
   if(name==='report-profit') renderProfitReport();
   if(name==='report-products') renderTopProductsReport();
-  if(name==='settings') { loadSettings(); renderStaffControls(); }
+  if(name==='settings') { loadSettings(); renderStaffControls(); loadAIConnection(); }
 }
 
 function toggleSidebar() {
@@ -928,7 +928,7 @@ function buildReceiptPreview() {
       <div class="receipt-logo">${shopInfo.name||'Long Do Cafe & Bakery'}</div>
       <div class="receipt-sub">${shopInfo.address||''}</div>
       <div class="receipt-sub">เลขที่: ${seq} · ${typeLabel}${(posType==='grab'||posType==='lineman')&&document.getElementById('refOrderNo')?.value.trim()?' #'+document.getElementById('refOrderNo').value.trim():''}</div>
-      ${cartCustomer?`<div class="receipt-customer">👤 ${cartCustomer.name}</div>`:''}
+      ${cartCustomer?`<div class="receipt-customer">👤 ${safeStaffText(cartCustomer.name)}</div>`:''}
       <div class="receipt-sub">${getOrderDateTime().toLocaleString('th-TH')}</div>
       <hr class="receipt-divider">
       ${cart.map(i=>{
@@ -940,7 +940,7 @@ function buildReceiptPreview() {
         ${addonStr?`<div style="font-size:0.82rem;font-weight:700;color:var(--ink);padding-left:8px;">↳ ${addonStr}</div>`:''}
         ${hasCustom?`<div style="font-size:0.78rem;font-weight:700;color:var(--sage);padding-left:8px;">💰 ราคาพิเศษ</div>`:''}
         ${hasDisc?`<div style="font-size:0.78rem;font-weight:700;color:var(--red);padding-left:8px;">🏷️ ส่วนลด ${discLabel}</div>`:''}
-        ${i.note?`<div style="font-size:0.78rem;font-weight:700;color:var(--ink);padding-left:8px;">📝 ${i.note}</div>`:''}`;
+        ${i.note?`<div style="font-size:0.78rem;font-weight:700;color:var(--ink);padding-left:8px;">📝 ${safeStaffText(i.note)}</div>`:''}`;
       }).join('')}
       <hr class="receipt-divider">
       <div class="receipt-row"><span>รวม</span><span>฿${subtotal}</span></div>
@@ -1109,7 +1109,7 @@ function printReceipt(order) {
       ${addonStr ? `<div class="sub">&#8627; ${addonStr}</div>` : ''}
       ${hasCustom ? `<div class="sub green">&#128176; ราคาพิเศษ</div>` : ''}
       ${hasDisc ? `<div class="sub red">&#128247; ส่วนลด ${discLabel}</div>` : ''}
-      ${i.note ? `<div class="sub gray">&#128221; ${i.note}</div>` : ''}`;
+      ${i.note ? `<div class="sub gray">&#128221; ${safeStaffText(i.note)}</div>` : ''}`;
   }).join('');
 
   // Pre-build ESC/POS items string to embed safely in HTML
@@ -1370,8 +1370,8 @@ function renderOrdersTable() {
       <td>${n}</td>
       <td style="font-family:monospace;font-weight:600;">#${o.orderNo}</td>
       <td>${o.date} ${o.time}</td>
-      <td>${o.customer?.name||'—'}</td>
-      <td><span class="pill ${o.type==='grab'?'pill-green':o.type==='lineman'?'pill-gold':'pill-blue'}">${o.type==='grab'?'Grab':o.type==='lineman'?'LINE MAN':'หน้าร้าน'}</span>${o.refNo?`<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:2px;">#${o.refNo}</div>`:''}</td>
+      <td>${safeStaffText(o.customer?.name||'—')}</td>
+      <td><span class="pill ${o.type==='grab'?'pill-green':o.type==='lineman'?'pill-gold':'pill-blue'}">${o.type==='grab'?'Grab':o.type==='lineman'?'LINE MAN':'หน้าร้าน'}</span>${o.refNo?`<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:2px;">#${safeStaffText(o.refNo)}</div>`:''}</td>
       <td>${safeStaffText(o.salesperson?.name||'—')}</td>
       <td>${o.isAdvertisement?'📣 โฆษณา':'—'}</td>
       <td><input aria-label="ส่วนลดรวมออเดอร์ ${o.orderNo} (บาท)" type="number" min="0" max="${o.subtotal}" step="0.01" value="${o.discount||0}" style="width:90px;" ${o.status==='cancelled'?'disabled':''} onchange="updateOrderDiscount(${o.id},this.value)"></td>
@@ -1437,6 +1437,8 @@ function viewOrder(id) {
   const gpAmt = getOrderGpAmount(order, gp);
   const gpEstimated = order.gpAmount==null && gpAmt>0;
   document.getElementById('orderDetailContent').innerHTML = `
+    ${order.importSource?`<div class="pill pill-blue">นำเข้าจากภาพและตรวจยืนยันแล้ว</div>`:''}
+    ${order.importNotes?`<p style="white-space:pre-wrap;">${safeStaffText(order.importNotes)}</p>`:''}
     <div class="grid-2" style="gap:16px;margin-bottom:16px;">
       <div>
         <div style="font-size:0.82rem;color:var(--muted);">เลขที่</div>
@@ -1448,11 +1450,11 @@ function viewOrder(id) {
       </div>
       <div>
         <div style="font-size:0.82rem;color:var(--muted);">ลูกค้า</div>
-        <div>${order.customer?.name||'—'}</div>
+        <div>${safeStaffText(order.customer?.name||'—')}</div>
       </div>
       <div>
         <div style="font-size:0.82rem;color:var(--muted);">ประเภท</div>
-        <div>${order.type==='grab'?'Grab':order.type==='lineman'?'LINE MAN':'หน้าร้าน'}${order.refNo?` · เลขที่ #${order.refNo}`:''}</div>
+        <div>${order.type==='grab'?'Grab':order.type==='lineman'?'LINE MAN':'หน้าร้าน'}${order.refNo?` · เลขที่ #${safeStaffText(order.refNo)}`:''}</div>
       </div>
       ${gpAmt>0?`<div>
         <div style="font-size:0.82rem;color:var(--muted);">หัก GP</div>
@@ -1477,7 +1479,7 @@ function viewOrder(id) {
         ${addonStr?`<div style="font-size:0.82rem;font-weight:700;color:var(--ink);padding-left:8px;">↳ ${addonStr}</div>`:''}
         ${hasCustom?`<div style="font-size:0.78rem;font-weight:700;color:var(--sage);padding-left:8px;">💰 ราคาพิเศษ</div>`:''}
         ${hasDisc?`<div style="font-size:0.78rem;font-weight:700;color:var(--red);padding-left:8px;">🏷️ ส่วนลด ${discLabel}</div>`:''}
-        ${i.note?`<div style="font-size:0.78rem;font-weight:700;color:var(--ink);padding-left:8px;">📝 ${i.note}</div>`:''}`;
+        ${i.note?`<div style="font-size:0.78rem;font-weight:700;color:var(--ink);padding-left:8px;">📝 ${safeStaffText(i.note)}</div>`:''}`;
       }).join('')}
       <hr class="receipt-divider">
       <div class="receipt-row"><span>รวม</span><span>฿${order.subtotal}</span></div>
@@ -2692,8 +2694,8 @@ function renderSalesReport(){
     return `<tr>
     <td style="font-family:monospace;">#${o.orderNo}</td>
     <td>${o.date} ${o.time}</td>
-    <td>${o.customer?.name||'—'}</td>
-    <td><span class="pill pill-blue">${o.type==='grab'?'Grab':o.type==='lineman'?'LINE MAN':'หน้าร้าน'}</span>${o.refNo?`<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:2px;">#${o.refNo}</div>`:''}</td>
+    <td>${safeStaffText(o.customer?.name||'—')}</td>
+    <td><span class="pill pill-blue">${o.type==='grab'?'Grab':o.type==='lineman'?'LINE MAN':'หน้าร้าน'}</span>${o.refNo?`<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:2px;">#${safeStaffText(o.refNo)}</div>`:''}</td>
     <td>฿${o.subtotal}</td>
     <td style="color:var(--red);">${o.discount>0?'-฿'+o.discount:'—'}</td>
     <td style="font-weight:600;">฿${o.total}</td>
@@ -4055,12 +4057,38 @@ function renderStaffControls() {
   if(list) list.innerHTML='<table><thead><tr><th>ชื่อ</th><th>วิธีคิด</th><th>อัตรา</th><th></th></tr></thead><tbody>'+people.filter(p=>!p.inactive).map(p=>`<tr><td><input aria-label="ชื่อพนักงาน" value="${safeStaffText(p.name)}" onchange="updateSalesperson(${p.id},'name',this.value)"></td><td><select onchange="updateSalesperson(${p.id},'commissionType',this.value)"><option value="pct" ${p.commissionType==='pct'?'selected':''}>%</option><option value="thb" ${p.commissionType==='thb'?'selected':''}>บาท/ออเดอร์</option></select></td><td><input aria-label="อัตราคอมมิชชั่น" style="width:90px;" type="number" min="0" step="0.01" value="${p.rate}" onchange="updateSalesperson(${p.id},'rate',this.value)"></td><td><button class="btn btn-danger btn-sm" onclick="removeSalesperson(${p.id})">ลบพนักงาน</button></td></tr>`).join('')+'</tbody></table>';
 }
 function validStaffRate(type,rate) { return Number.isFinite(rate)&&rate>=0&&(type!=='pct'||rate<=100); }
+function staffSaveFeedback(message, error=false) {
+  const el=document.getElementById('staffSaveStatus');
+  if(el) { el.textContent=message; el.style.color=error?'var(--red)':'var(--sage)'; }
+  showToast(message,error?'error':'success');
+}
 function addSalesperson() {
-  const name=document.getElementById('staffName').value.trim(), commissionType=document.getElementById('staffCommissionType').value, rate=Number(document.getElementById('staffCommissionRate').value);
-  if(!name||!validStaffRate(commissionType,rate)) { showToast('กรอกชื่อและอัตราให้ถูกต้อง (เปอร์เซ็นต์ 0–100)','error'); return; }
-  const people=DB.get('salespeople');people.push({id:Math.max(Date.now(),...people.map(p=>p.id+1)),name,commissionType,rate:money2(rate)});
-  if(!DB.set('salespeople',people))return;
-  document.getElementById('staffName').value='';renderStaffControls();showToast('เพิ่มพนักงานแล้ว','success');
+  const button=document.getElementById('staffSaveButton');
+  if(button) button.disabled=true;
+  try {
+    const name=document.getElementById('staffName').value.trim();
+    const commissionType=document.getElementById('staffCommissionType').value;
+    const rawRate=document.getElementById('staffCommissionRate').value.trim();
+    const rate=Number(rawRate);
+    if(!name) { staffSaveFeedback('กรุณากรอกชื่อพนักงาน',true); document.getElementById('staffName').focus(); return; }
+    if(!['pct','thb'].includes(commissionType)||!rawRate||!validStaffRate(commissionType,rate)) {
+      staffSaveFeedback('กรุณากรอกอัตราคอมมิชชั่นตั้งแต่ 0 ขึ้นไป (เปอร์เซ็นต์ไม่เกิน 100)',true); return;
+    }
+    const people=DB.get('salespeople',[]);
+    if(!Array.isArray(people)) { staffSaveFeedback('ข้อมูลพนักงานเดิมมีรูปแบบไม่ถูกต้อง กรุณาสำรองข้อมูลก่อนตรวจสอบ',true); return; }
+    const lastId=people.reduce((max,p)=>Number.isSafeInteger(Number(p.id))?Math.max(max,Number(p.id)):max,0);
+    const person={id:Math.max(Date.now(),lastId+1),name,commissionType,rate:money2(rate)};
+    const updated=[...people,person];
+    if(!DB.set('salespeople',updated)) { staffSaveFeedback('บันทึกไม่สำเร็จ กรุณาตรวจสอบพื้นที่จัดเก็บหรือสิทธิ์ของเบราว์เซอร์',true); return; }
+    const saved=DB.get('salespeople',[]);
+    if(!Array.isArray(saved)||!saved.some(p=>p.id===person.id)) { staffSaveFeedback('ตรวจสอบข้อมูลหลังบันทึกไม่สำเร็จ กรุณาลองอีกครั้ง',true); return; }
+    document.getElementById('staffName').value='';
+    renderStaffControls();
+    staffSaveFeedback('บันทึกพนักงาน “'+name+'” แล้ว — เลือกได้ในหน้าขาย');
+  } catch(error) {
+    console.error('Save salesperson failed',error);
+    staffSaveFeedback('บันทึกพนักงานไม่สำเร็จ: '+(error.message||String(error)),true);
+  } finally { if(button)button.disabled=false; }
 }
 function updateSalesperson(id,key,value) {
   const people=DB.get('salespeople'), p=people.find(p=>p.id===id);if(!p)return;
@@ -4093,3 +4121,98 @@ function updateOrderDiscount(id,value) {
   if(editingOrderId===id){editingOrderId=null;editingOrderOriginal=null;clearCart();document.getElementById('editOrderBanner').style.display='none';}
   renderOrdersTable();showToast('บันทึกส่วนลดและคำนวณยอดใหม่แล้ว','success');
 }
+
+// Phase 7 — image extraction is read-only until explicit review and confirmation.
+let aiDraft=null, aiImageData='', aiImageHash='', aiBusy=false, aiImageGeneration=0;
+function aiMessage(text,error=false){const el=document.getElementById('aiImportStatus');el.textContent=text;el.style.color=error?'var(--red)':'var(--sage)';}
+function normalizeAIName(name){return String(name||'').normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase();}
+function aiCustomerCandidates(name,phone,customers=DB.get('customers')) {
+  const n=normalizeAIName(name),p=String(phone||'').replace(/\D/g,'');
+  const byName=customers.filter(c=>n&&normalizeAIName(c.name)===n);
+  // A phone is used to narrow identical names only; never attach to a differently named person silently.
+  const exactPhone=byName.filter(c=>p&&String(c.phone||'').replace(/\D/g,'')===p);
+  return exactPhone.length?exactPhone:byName;
+}
+function loadAIConnection(){document.getElementById('aiEndpoint').value=DB.get('aiConnection',{}).endpoint||'';document.getElementById('aiAccessToken').value=sessionStorage.getItem('ld_aiAccessToken')||'';}
+function saveAIConnection(){
+  try {const endpoint=document.getElementById('aiEndpoint').value.trim();const url=new URL(endpoint);
+    if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw Error('URL ต้องเป็น HTTPS และไม่มีรหัสหรือพารามิเตอร์');
+    const token=document.getElementById('aiAccessToken').value.trim();if(!token)throw Error('กรอกรหัสเชื่อมต่อ AI');
+    if(!DB.set('aiConnection',{endpoint}))return;sessionStorage.setItem('ld_aiAccessToken',token);document.getElementById('aiConnectionStatus').textContent='บันทึกการเชื่อมต่อแล้ว';showToast('บันทึกการเชื่อมต่อแล้ว','success');
+  }catch(e){document.getElementById('aiConnectionStatus').textContent=e.message;}
+}
+function openAIImport(){
+  if(aiBusy){openModal('aiImportModal');return;}
+  aiDraft=null;aiImageData='';aiImageHash='';aiImageGeneration++;
+  document.getElementById('aiImageFile').value='';document.getElementById('aiImagePreview').style.display='none';document.getElementById('aiOrderReview').style.display='none';document.getElementById('aiOrderConfirmed').checked=false;aiMessage('เลือกภาพหนึ่งออเดอร์ แล้วกดให้ GPT อ่านภาพ');openModal('aiImportModal');
+}
+async function selectAIImage(file){
+  if(aiBusy)return;
+  const generation=++aiImageGeneration;aiDraft=null;aiImageData='';aiImageHash='';document.getElementById('aiOrderReview').style.display='none';document.getElementById('aiImagePreview').style.display='none';
+  if(!file)return;
+  try{if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>6*1024*1024)throw Error('ใช้ไฟล์ JPG, PNG หรือ WEBP ขนาดไม่เกิน 6 MB');
+    const bytes=await file.arrayBuffer();const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
+    const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('อ่านไฟล์ภาพไม่ได้'));reader.readAsDataURL(file);});
+    if(generation!==aiImageGeneration)return;aiImageHash=hash;aiImageData=data;const preview=document.getElementById('aiImagePreview');preview.src=data;preview.style.display='block';aiMessage('ภาพพร้อมอ่าน');
+  }catch(e){if(generation===aiImageGeneration)aiMessage(e.message,true);}
+}
+async function readAIImage(){
+  if(aiBusy)return;
+  try{if(!aiImageData)throw Error('เลือกภาพและรอโหลดให้เสร็จก่อน');const endpoint=DB.get('aiConnection',{}).endpoint,token=sessionStorage.getItem('ld_aiAccessToken');if(!endpoint||!token)throw Error('ไปตั้งค่าระบบเพื่อบันทึก URL และรหัสเชื่อมต่อ AI ก่อน');
+    if(DB.get('orders').some(o=>o.importHash===aiImageHash))throw Error('ภาพนี้ถูกบันทึกเป็นออเดอร์แล้ว');
+    aiBusy=true;document.getElementById('aiReadButton').disabled=true;document.getElementById('aiImageFile').disabled=true;document.getElementById('aiOrderReview').style.display='none';aiMessage('GPT กำลังอ่านภาพ…');
+    const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','x-pos-import-token':token},body:JSON.stringify({image:aiImageData}),signal:AbortSignal.timeout(100000)});
+    const data=await response.json();if(!response.ok)throw Error(data.error||'อ่านภาพไม่สำเร็จ');
+    if(!data.order||!Array.isArray(data.order.items)||!data.order.items.length)throw Error('ไม่พบรายการสินค้า');
+    aiDraft=data.order;renderAIReview();
+  }catch(e){aiMessage(e.message||'เชื่อมต่อไม่ได้ กรุณาตรวจ URL และการติดตั้งฟังก์ชัน',true);}
+  finally{aiBusy=false;document.getElementById('aiReadButton').disabled=false;document.getElementById('aiImageFile').disabled=false;}
+}
+function matchAICustomer(){
+  const name=document.getElementById('aiCustomerName').value,phone=document.getElementById('aiCustomerPhone').value;
+  const matches=aiCustomerCandidates(name,phone),select=document.getElementById('aiCustomerMatch');
+  select.innerHTML=matches.length?(matches.length>1?'<option value="">ชื่อซ้ำ กรุณาเลือกลูกค้า</option>':'')+matches.map(c=>`<option value="${c.id}">${safeStaffText(c.name)} · ${safeStaffText(c.phone||'ไม่ระบุโทร')} · #${c.id}</option>`).join(''):'<option value="new">สร้างลูกค้าใหม่ตามชื่อที่กรอก</option>';
+  document.getElementById('aiCustomerHint').textContent=matches.length===1?'พบลูกค้าเดิม ใช้ข้อมูลเดิมโดยไม่เปลี่ยนชื่อหรือเบอร์':matches.length>1?'พบชื่อซ้ำ ต้องเลือกคนที่ถูกต้องก่อนบันทึก':'ยังไม่พบชื่อเดียวกัน จะสร้างลูกค้าใหม่เมื่อยืนยัน';
+}
+function renderAIReview(){
+  const d=aiDraft;const fields={aiCustomerName:d.customerName||'',aiCustomerPhone:d.customerPhone||'',aiOrderRef:d.reference||'',aiOrderChannel:d.channel||'',aiOrderDate:d.date||'',aiOrderTime:(d.time||'').slice(0,5),aiOrderDiscount:d.discount??'',aiOrderNotes:d.notes||'',aiOrderPay:''};
+  Object.entries(fields).forEach(([id,value])=>document.getElementById(id).value=value);
+  document.getElementById('aiOrderConfirmed').checked=false;document.getElementById('aiOrderAd').checked=false;
+  document.getElementById('aiOrderStaff').innerHTML='<option value="">ไม่ระบุพนักงาน</option>'+DB.get('salespeople').filter(p=>!p.inactive).map(p=>`<option value="${p.id}">${safeStaffText(p.name)}</option>`).join('');
+  const menus=DB.get('menus');d.items=d.items.map(i=>{const matches=menus.filter(m=>normalizeAIName(m.name)===normalizeAIName(i.name));return {...i,menuId:matches.length===1?String(matches[0].id):'',unitPrice:i.unitPrice??(i.lineTotal!=null&&i.quantity>0?money2(i.lineTotal/i.quantity):null)};});
+  matchAICustomer();renderAIItems();setAIGpDefault();document.getElementById('aiOrderReview').style.display='block';
+  aiMessage('อ่านแล้ว กรุณาตรวจข้อมูลก่อนบันทึก\n'+(d.warnings||[]).join('\n')+'\nช่องที่ภาพไม่ระบุจะเว้นว่าง ต้องยืนยันวันที่ เวลา ช่องทางและส่วนลดเอง');
+}
+function renderAIItems(){const menus=DB.get('menus');document.getElementById('aiReviewItems').innerHTML=aiDraft.items.map((i,n)=>`<tr><td>${safeStaffText(i.name)}</td><td><select class="form-control" onchange="changeAIMenu(${n},this.value)"><option value="">เลือกเมนู</option>${menus.map(m=>`<option value="${m.id}" ${String(m.id)===i.menuId?'selected':''}>${safeStaffText(m.name)}</option>`).join('')}</select></td><td><input style="width:70px;" type="number" min="1" step="1" value="${i.quantity}" onchange="updateAIItem(${n},'quantity',this.value)"></td><td><input style="width:90px;" type="number" min="0" step="0.01" value="${i.unitPrice??''}" onchange="updateAIItem(${n},'unitPrice',this.value)"></td><td><input value="${safeStaffText(i.notes||'')}" onchange="updateAIItem(${n},'notes',this.value)"></td><td><button class="btn btn-danger btn-sm" type="button" onclick="removeAIItem(${n})">ลบ</button></td></tr>`).join('');updateAIReviewTotals();}
+function changeAIMenu(n,id){aiDraft.items[n].menuId=id;const m=DB.get('menus').find(m=>String(m.id)===id);if(m&&aiDraft.items[n].unitPrice==null){const ch=document.getElementById('aiOrderChannel').value;aiDraft.items[n].unitPrice=m[ch==='grab'?'p2':ch==='lineman'?'p3':'p1']??m.p1;renderAIItems();}document.getElementById('aiOrderConfirmed').checked=false;updateAIReviewTotals();}
+function updateAIItem(n,key,value){aiDraft.items[n][key]=key==='notes'?value:value===''?null:Number(value);document.getElementById('aiOrderConfirmed').checked=false;updateAIReviewTotals();}
+function removeAIItem(n){aiDraft.items.splice(n,1);document.getElementById('aiOrderConfirmed').checked=false;renderAIItems();}
+function addAIReviewItem(){aiDraft.items.push({name:'รายการเพิ่มเติม',menuId:'',quantity:1,unitPrice:null,notes:''});document.getElementById('aiOrderConfirmed').checked=false;renderAIItems();}
+function setAIGpDefault(){const ch=document.getElementById('aiOrderChannel').value;document.getElementById('aiOrderGp').value=ch?(DB.get('gpSettings',{instore:0,grab:32.1,lineman:32.1})[ch]??0):'';updateAIReviewTotals();}
+function updateAIReviewTotals(){if(!aiDraft)return;const subtotal=money2(aiDraft.items.reduce((s,i)=>s+(Number(i.quantity)||0)*(Number(i.unitPrice)||0),0));const discount=Number(document.getElementById('aiOrderDiscount').value)||0,total=money2(subtotal-discount),gp=money2(total*(Number(document.getElementById('aiOrderGp').value)||0)/100);document.getElementById('aiReviewTotals').textContent=`รวมสินค้า ฿${subtotal} · ส่วนลด ฿${discount} · ยอดขาย ฿${total}\nGP ฿${gp} · ร้านได้รับ ฿${money2(total-gp)}`+(aiDraft.total!=null?`\nยอดรวมที่อ่านจากภาพ ฿${aiDraft.total}${Math.abs(aiDraft.total-total)>0.01?' — ไม่ตรงกัน กรุณาตรวจและแก้ไขก่อนยืนยัน':''}`:'\nภาพไม่ระบุยอดรวม กรุณาตรวจยอดที่คำนวณ');}
+function aiReviewValues(){return Object.fromEntries(['aiCustomerName','aiCustomerPhone','aiCustomerMatch','aiOrderRef','aiOrderChannel','aiOrderDate','aiOrderTime','aiOrderGp','aiOrderStaff','aiOrderPay','aiOrderDiscount','aiOrderNotes'].map(id=>[id,document.getElementById(id).value]));}
+function buildAIOrder(d,v,hash,orders,customers,menus,people,seq){
+  const name=v.aiCustomerName.trim();if(!name)throw Error('กรอกชื่อลูกค้าก่อนบันทึก');
+  if(!['instore','grab','lineman'].includes(v.aiOrderChannel))throw Error('เลือกช่องทางขาย');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(v.aiOrderDate)||Number.isNaN(Date.parse(v.aiOrderDate))||new Date(v.aiOrderDate).toISOString().slice(0,10)!==v.aiOrderDate||!/^([01]\d|2[0-3]):[0-5]\d$/.test(v.aiOrderTime))throw Error('ระบุวันที่และเวลาออเดอร์ให้ถูกต้อง');
+  const discount=Number(v.aiOrderDiscount),gpPct=Number(v.aiOrderGp);if(v.aiOrderDiscount===''||v.aiOrderGp===''||!Number.isFinite(discount)||discount<0||!Number.isFinite(gpPct)||gpPct<0||gpPct>100)throw Error('ระบุส่วนลดและ GP ให้ถูกต้อง (ไม่มีส่วนลดให้กรอก 0)');
+  if(!['platform','qr','cash'].includes(v.aiOrderPay))throw Error('เลือกวิธีรับชำระ');
+  const ref=v.aiOrderRef.trim();if(orders.some(o=>(hash&&o.importHash===hash)||(ref&&o.type===v.aiOrderChannel&&normalizeAIName(o.refNo)===normalizeAIName(ref))))throw Error('ภาพหรือเลขอ้างอิงนี้มีออเดอร์อยู่แล้ว');
+  if(!d.items.length)throw Error('ต้องมีสินค้าอย่างน้อยหนึ่งรายการ');
+  const items=d.items.map(i=>{const m=menus.find(m=>String(m.id)===i.menuId);if(!m)throw Error('เลือกเมนูใน POS ให้ครบ');if(!Number.isInteger(i.quantity)||i.quantity<1||i.quantity>1000||i.unitPrice==null||!Number.isFinite(i.unitPrice)||i.unitPrice<0)throw Error('จำนวนและราคาสินค้าไม่ถูกต้อง');return {id:m.id,name:m.name,icon:m.icon||'🥤',qty:i.quantity,price:money2(i.unitPrice),total:money2(i.unitPrice*i.quantity),cost:Number(m.cost)||0,addons:[],note:i.notes||'',customPrice:money2(i.unitPrice),itemDiscount:0,itemDiscountType:'thb'};});
+  const subtotal=money2(items.reduce((s,i)=>s+i.total,0));if(discount>subtotal)throw Error('ส่วนลดเกินยอดสินค้า');const total=money2(subtotal-discount),gpAmount=money2(total*gpPct/100),cost=money2(items.reduce((s,i)=>s+i.cost*i.qty,0));
+  const matches=aiCustomerCandidates(name,v.aiCustomerPhone,customers);let customer;
+  if(matches.length){customer=matches.find(c=>String(c.id)===v.aiCustomerMatch);if(!customer)throw Error('ข้อมูลลูกค้าเปลี่ยนหรือมีชื่อซ้ำ กรุณาเลือกลูกค้าใหม่');customer={...customer};}
+  else{if(v.aiCustomerMatch!=='new')throw Error('ตรวจข้อมูลลูกค้าใหม่อีกครั้ง');customer={id:Math.max(0,...customers.map(c=>Number(c.id)||0))+1,name,phone:v.aiCustomerPhone.trim(),type:DB.get('customerTypes')[0]?.id??1,total:0,lastOrder:null};}
+  customer.total=money2((Number(customer.total)||0)+total);customer.lastOrder=!customer.lastOrder||v.aiOrderDate>customer.lastOrder?v.aiOrderDate:customer.lastOrder;
+  const staff=v.aiOrderStaff?people.find(p=>String(p.id)===v.aiOrderStaff&&!p.inactive):null;if(v.aiOrderStaff&&!staff)throw Error('พนักงานถูกลบแล้ว กรุณาเลือกใหม่');
+  const id=Math.max(Number(seq)||1000001,...orders.map(o=>(Number(o.id)||0)+1));
+  return {customer,order:{id,orderNo:String(id).padStart(7,'0'),date:v.aiOrderDate,time:v.aiOrderTime+':00',type:v.aiOrderChannel,refNo:ref,customer:{id:customer.id,name:customer.name},items,subtotal,discount:money2(discount),total,cost,profit:money2(total-cost),gpPct,gpAmount,netRevenue:money2(total-gpAmount),salesperson:staff?{...staff}:null,isAdvertisement:!!v.advertisement,payMethod:v.aiOrderPay,received:total,change:0,status:'completed',promoIds:[],importHash:hash,importSource:'openai-image',importNotes:v.aiOrderNotes||''}};
+}
+// Commit local records together; send sync only after all local writes succeed.
+function commitAIImport(records){const old=new Map(Object.keys(records).map(k=>[k,localStorage.getItem('ld_'+k)]));try{for(const [k,value] of Object.entries(records))localStorage.setItem('ld_'+k,JSON.stringify(value));}catch(e){for(const [k,value] of old){try{if(value===null)localStorage.removeItem('ld_'+k);else localStorage.setItem('ld_'+k,value);}catch{}}throw Error('บันทึกไม่สำเร็จ กรุณาตรวจพื้นที่จัดเก็บและสำรองข้อมูล');}for(const [k,value] of Object.entries(records)){if(typeof SyncEngine!=='undefined'){try{SyncEngine.onSet(k,value);}catch(e){console.error('AI import sync queued error',e);}}}}
+async function saveAIReviewedOrder(){if(aiBusy)return;const button=document.getElementById('aiSaveOrderButton');try{if(!aiDraft||!document.getElementById('aiOrderConfirmed').checked)throw Error('ตรวจข้อมูลและติ๊กยืนยันขายสำเร็จก่อนบันทึก');aiBusy=true;button.disabled=true;
+  const perform=()=>{const orders=DB.get('orders'),customers=DB.get('customers'),v=aiReviewValues();v.advertisement=document.getElementById('aiOrderAd').checked;const {order,customer}=buildAIOrder(aiDraft,v,aiImageHash,orders,customers,DB.get('menus'),DB.get('salespeople'),DB.get('orderSeq',1000001));const updated=customers.filter(c=>c.id!==customer.id);updated.push(customer);commitAIImport({customers:updated,orders:[...orders,order],orderSeq:order.id+1});return order;};
+  const order=navigator.locks?await navigator.locks.request('longdo-ai-import',perform):perform();
+  aiDraft=null;aiImageData='';aiImageHash='';closeModal('aiImportModal');showPage('orders');showToast('บันทึกออเดอร์ #'+order.orderNo+' และยอดลูกค้าแล้ว','success');
+}catch(e){aiMessage(e.message,true);if(/ลูกค้า/.test(e.message))matchAICustomer();}finally{aiBusy=false;button.disabled=false;}}
