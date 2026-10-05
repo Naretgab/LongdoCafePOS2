@@ -848,6 +848,13 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199; }
 .sidebar-overlay.open { display: block; }
 
+
+.expenses-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; align-items:start; }
+.expense-panel { min-width:0; margin:0; }
+.expense-panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+.expense-panel-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.expense-panel .table-wrap { overflow-x:auto; }
+@media (max-width:767px) { .expenses-columns { grid-template-columns:minmax(0,1fr); } }
 </style>
 </head>
 <body>
@@ -1184,11 +1191,6 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     <!-- ========== PAGE: EXPENSES ========== -->
     <div id="page-expenses" class="page">
       <div class="content">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <button class="btn btn-ghost" onclick="openCatManageModal()">🏷️ จัดการหมวดหมู่</button>
-          <button class="btn btn-primary" onclick="openExpenseModal()">+ บันทึกรายจ่าย</button>
-          <button class="btn btn-primary" onclick="openAdExpense()">📣 บันทึกโฆษณา + แคมเปญ</button>
-        </div>
         <div class="tabs" style="flex-wrap:wrap;">
           <button class="tab-btn active" onclick="switchReportTab('all','expenses')">ทั้งหมด</button>
           <button class="tab-btn" onclick="switchReportTab('day','expenses')">รายวัน</button>
@@ -1211,8 +1213,11 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
             </select>
           </div>
         </div>
+        <div class="expenses-columns">
+<div class="card expense-panel">
+          <div class="expense-panel-header"><div class="card-title">รายจ่ายปกติ</div><div class="expense-panel-actions"><button class="btn btn-ghost btn-sm" onclick="openCatManageModal()">🏷️ จัดการหมวดหมู่</button><button class="btn btn-primary btn-sm" onclick="openExpenseModal()">+ บันทึกรายจ่าย</button></div></div>
         <div style="margin-bottom:10px;font-size:0.85rem;color:var(--muted);font-weight:600;" id="expPeriodTotal"></div>
-        <div class="card">
+        
           <div class="table-wrap">
             <table>
               <thead><tr><th>วันที่</th><th>รายการ</th><th>หมวดหมู่</th><th>จำนวนเงิน</th><th>หมายเหตุ</th><th>ใบเสร็จ</th><th></th></tr></thead>
@@ -1220,7 +1225,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
             </table>
           </div>
         </div>
-        <div class="card" style="margin-top:16px;"><div class="card-title">📣 ค่าโฆษณา + แคมเปญ (หักจากยอดขายสุทธิ)</div><p>แบ่งตามยอดหลัง GP เฉพาะออเดอร์โฆษณาในวันและช่องทางเดียวกัน</p><div id="adPeriodTotal"></div><p id="adAllocationNote" style="color:var(--caramel);"></p><div class="table-wrap"><table><thead><tr><th>วันที่</th><th>ประเภท</th><th>รายการ</th><th>ช่องทาง</th><th>จำนวนเงิน</th><th>หมายเหตุ</th><th></th></tr></thead><tbody id="adExpenseTable"></tbody></table></div></div>
+        <div class="card expense-panel"><div class="expense-panel-header"><div class="card-title">📣 โฆษณา + แคมเปญ</div><button class="btn btn-primary btn-sm" onclick="openAdExpense()">+ บันทึกโฆษณา + แคมเปญ</button></div><p>แบ่งตามยอดหลัง GP เฉพาะออเดอร์โฆษณาในวันและช่องทางเดียวกัน</p><div id="adPeriodTotal"></div><p id="adAllocationNote" style="color:var(--caramel);"></p><div class="table-wrap"><table><thead><tr><th>วันที่</th><th>ประเภท</th><th>รายการ</th><th>ช่องทาง</th><th>จำนวนเงิน</th><th>หมายเหตุ</th><th></th></tr></thead><tbody id="adExpenseTable"></tbody></table></div></div>
+        </div>
       </div>
     </div>
 
@@ -2075,7 +2081,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 <div class="modal-overlay" id="adExpenseModal"><div class="modal"><div class="modal-header"><h3>บันทึกโฆษณา + แคมเปญ</h3><button class="btn btn-ghost" onclick="closeModal('adExpenseModal')">✕</button></div>
 <label>ประเภท<select class="form-control" id="adKind"><option value="advertisement">โฆษณา</option><option value="campaign">แคมเปญ</option></select></label><label>วันที่ลงโฆษณา / แคมเปญ<input class="form-control" type="date" id="adDate"></label><label>ช่องทาง<select class="form-control" id="adChannel"><option value="instore">หน้าร้าน</option><option value="grab">Grab</option><option value="lineman">LINE MAN</option></select></label><label>ชื่อรายการ<input class="form-control" id="adName" placeholder="เช่น โฆษณา Grab"></label><label>จำนวนเงิน (บาท)<input class="form-control" type="number" min="0.01" step="0.01" id="adAmount"></label><label>หมายเหตุ<input class="form-control" id="adNote"></label><p>ค่าโฆษณา + แคมเปญจะหักจากยอดขายสุทธิ และแบ่งเฉพาะออเดอร์ที่ติ๊กโฆษณาในวันและช่องทางนี้ กรณีครอบคลุมหลายวันให้บันทึกแยกแต่ละวัน</p><div id="adSaveStatus" role="status" style="color:var(--red);"></div><button class="btn btn-primary" onclick="saveAdExpense()">บันทึกโฆษณา + แคมเปญ</button></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="supabase-sync.js?v=31"></script>
-<script src="app.js?v=31"></script>
+<script src="supabase-sync.js?v=32"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>
