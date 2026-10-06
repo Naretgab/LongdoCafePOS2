@@ -251,7 +251,7 @@ const pageTitles = {
   categories:'หมวดหมู่สินค้า', customers:'ลูกค้า', promotions:'โปรโมชั่น',
   ingredients:'วัตถุดิบ', expenses:'รายจ่าย', 'report-sales':'รายงานยอดขาย',
   'report-profit':'กำไร-ขาดทุน', 'report-products':'สินค้าขายดี',
-  settings:'ตั้งค่าระบบ'
+  staff:'พนักงาน', settings:'ตั้งค่าระบบ'
 };
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -271,6 +271,7 @@ function showPage(name) {
   if(name==='customers') renderCustomerTable();
   if(name==='promotions') renderPromoTable();
   if(name==='ingredients') renderIngTable();
+  if(name==='staff') { renderStaffControls(); renderEmployeePage(); }
   if(name==='expenses') renderExpTable();
   if(name==='orders') renderOrdersTable();
   if(name==='report-sales') renderSalesReport();
@@ -4072,6 +4073,7 @@ function renderStaffControls() {
   const selectable=people.filter(p=>!p.inactive);
   if(selectedSalesperson&&!selectable.some(p=>p.id===selectedSalesperson.id)) selectable.push(selectedSalesperson);
   if(select) { select.innerHTML='<option value="">ไม่ระบุพนักงาน</option>'+selectable.map(p=>`<option value="${p.id}">${safeStaffText(p.name)}</option>`).join(''); select.value=selectedSalesperson?String(selectedSalesperson.id):''; }
+  if(currentPage==='staff') renderEmployeePage();
   const list=document.getElementById('staffList');
   if(list) list.innerHTML='<table><thead><tr><th>ชื่อ</th><th>วิธีคิด</th><th>อัตรา</th><th></th></tr></thead><tbody>'+people.filter(p=>!p.inactive).map(p=>`<tr><td><input aria-label="ชื่อพนักงาน" value="${safeStaffText(p.name)}" onchange="updateSalesperson(${p.id},'name',this.value)"></td><td><select onchange="updateSalesperson(${p.id},'commissionType',this.value)"><option value="pct" ${p.commissionType==='pct'?'selected':''}>%</option><option value="thb" ${p.commissionType==='thb'?'selected':''}>บาท/ออเดอร์</option></select></td><td><input aria-label="อัตราคอมมิชชั่น" style="width:90px;" type="number" min="0" step="0.01" value="${p.rate}" onchange="updateSalesperson(${p.id},'rate',this.value)"></td><td><button class="btn btn-danger btn-sm" onclick="removeSalesperson(${p.id})">ลบพนักงาน</button></td></tr>`).join('')+'</tbody></table>';
 }
@@ -4282,4 +4284,53 @@ function renderAdExpenses(period,key){
   document.getElementById('adPeriodTotal').textContent=`ค่าโฆษณา + แคมเปญรวม ฿${total.toLocaleString()} — แยกจากรายจ่ายทั่วไป`;
   document.getElementById('adAllocationNote').textContent=missing.length?'ยังไม่มีออเดอร์โฆษณาที่มียอดหลัง GP เป็นบวกสำหรับ: '+missing.map(a=>`${a.date} ${adChannelLabel(a.channel)} ฿${a.amount}`).join(', ')+' ค่าโฆษณา + แคมเปญยังคงหักจากยอดสุทธิรวม แต่ยังไม่แบ่งให้พนักงาน':'';
   document.getElementById('adExpenseTable').innerHTML=ads.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).map(a=>`<tr><td>${a.date}</td><td>${a.kind==='campaign'?'แคมเปญ':'โฆษณา'}</td><td>${safeStaffText(a.name)}</td><td>${adChannelLabel(a.channel)}</td><td>฿${a.amount.toLocaleString()}</td><td>${safeStaffText(a.note||'—')}</td><td><button class="btn btn-ghost btn-sm" onclick="openAdExpense(${a.id})">แก้ไข</button> <button class="btn btn-danger btn-sm" onclick="deleteAdExpense(${a.id})">ลบ</button></td></tr>`).join('')||'<tr><td colspan="7">ไม่มีค่าโฆษณา + แคมเปญหรือแคมเปญ</td></tr>';
+}
+
+// Employee reporting and printable commission slips. Financial totals remain derived.
+function employeePeriodBounds(period,key){
+  if(period==='custom') return String(key).split('|');
+  if(period==='day') return [key,key];
+  if(period==='month'){const [y,m]=key.split('-').map(Number);return [key+'-01',key+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0')];}
+  return [key+'-01-01',key+'-12-31'];
+}
+function employeeReportData(period,key,selected='all'){
+  const people=new Map(DB.get('salespeople').map(p=>[String(p.id),p]));
+  const groups=new Map();
+  people.forEach((p,id)=>{if(!p.inactive||selected===id)groups.set(id,{id,name:p.name,inactive:!!p.inactive,count:0,sales:0,gp:0,ads:0,net:0,commission:0});});
+  const orders=getFilteredOrders(period,key).filter(o=>o.salesperson&& (selected==='all'||String(o.salesperson.id)===selected));
+  orders.forEach(o=>{const id=String(o.salesperson.id);if(!groups.has(id))groups.set(id,{id,name:people.get(id)?.name||o.salesperson.name,inactive:!!people.get(id)?.inactive,count:0,sales:0,gp:0,ads:0,net:0,commission:0});const g=groups.get(id);g.count++;g.sales+=Number(o.total);g.gp+=money2(Number(o.total)-orderAfterGp(o));g.ads+=getOrderAdCost(o);g.net+=orderNetSales(o);g.commission+=orderCommission(o);});
+  const rows=[...groups.values()].filter(g=>selected==='all'||g.id===selected).map(g=>{['sales','gp','ads','net','commission'].forEach(k=>g[k]=money2(g[k]));return g;});
+  const totals=rows.reduce((s,g)=>{['count','sales','gp','ads','net','commission'].forEach(k=>s[k]+=g[k]);return s;},{count:0,sales:0,gp:0,ads:0,net:0,commission:0});
+  ['sales','gp','ads','net','commission'].forEach(k=>totals[k]=money2(totals[k]));return {rows,orders,totals,bounds:employeePeriodBounds(period,key)};
+}
+function switchStaffPeriod(period,button){reportPeriod.staff=period;document.getElementById('page-staff').querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));button.classList.add('active');renderEmployeePage();}
+let employeeVisibleRows=[],employeeSlipDraft=null;
+function renderEmployeePage(){
+  const period=reportPeriod.staff||'day',key=syncPeriodPickers('employee',period,false),select=document.getElementById('employeeFilter');
+  const selected=select.value||'all',people=new Map(DB.get('salespeople').map(p=>[String(p.id),p]));
+  DB.get('orders').forEach(o=>{if(o.salesperson&&!people.has(String(o.salesperson.id)))people.set(String(o.salesperson.id),{...o.salesperson,inactive:true});});
+  select.innerHTML='<option value="all">พนักงานทั้งหมด</option>'+[...people.values()].map(p=>`<option value="${safeStaffText(String(p.id))}">${safeStaffText(p.name)}${p.inactive?' (ประวัติ)':''}</option>`).join('');select.value=people.has(selected)?selected:'all';
+  const data=employeeReportData(period,key,select.value);employeeVisibleRows=data.rows;
+  document.getElementById('employeePeriodLabel').textContent=`ช่วงวันที่คำนวณ: ${data.bounds[0]} ถึง ${data.bounds[1]} (รวมทั้งสองวัน)`;
+  document.getElementById('employeeStats').innerHTML=[['ออเดอร์',data.totals.count],['ยอดขายหลังส่วนลด',data.totals.sales],['ยอดขายสุทธิ',data.totals.net],['ค่าคอมมิชชั่น',data.totals.commission]].map(([label,value],i)=>`<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value">${i?'฿':''}${value.toLocaleString()}</div></div>`).join('');
+  document.getElementById('employeeSummary').innerHTML=data.rows.map((g,i)=>`<tr><td>${safeStaffText(g.name)}${g.inactive?' (ประวัติ)':''}</td><td>${g.count}</td>${['sales','gp','ads','net','commission'].map(k=>`<td>฿${g[k].toLocaleString()}</td>`).join('')}<td><button class="btn btn-ghost btn-sm" onclick="openEmployeeSlip(${i})">สลิปจ่ายเงิน</button></td></tr>`).join('')||'<tr><td colspan="8">ไม่มีพนักงานในช่วงที่เลือก</td></tr>';
+  document.getElementById('employeeOrders').innerHTML=data.orders.slice().sort((a,b)=>b.date.localeCompare(a.date)||Number(b.id)-Number(a.id)).map(o=>`<tr><td>#${safeStaffText(String(o.orderNo||o.id))}</td><td>${safeStaffText(o.date)}</td><td>${safeStaffText(o.salesperson.name)}</td><td>${adChannelLabel(o.type||'instore')}</td><td>฿${money2(o.total).toLocaleString()}</td><td>฿${orderNetSales(o).toLocaleString()}</td><td>฿${orderCommission(o).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan="7">ไม่มีออเดอร์</td></tr>';
+  const unmatched=getAdAllocation().unallocated.filter(a=>dateMatchesPeriod(a.date,period,key)).reduce((s,a)=>s+a.amount,0);
+  document.getElementById('employeeAllocationNote').textContent='ยอดในหน้านี้รวมเฉพาะออเดอร์ที่ระบุพนักงาน ออเดอร์ยกเลิกไม่รวม'+(unmatched>0?` • ค่าโฆษณา + แคมเปญ ฿${money2(unmatched).toLocaleString()} ยังไม่มีออเดอร์สำหรับแบ่ง จึงยังไม่หักฐานคอมมิชชั่น`: '');
+}
+function openEmployeeSlip(index){
+  const g=employeeVisibleRows[index];if(!g)return;
+  const period=reportPeriod.staff||'day',key=syncPeriodPickers('employee',period,false),data=employeeReportData(period,key,g.id),row=data.rows.find(r=>r.id===g.id);if(!row)return;
+  employeeSlipDraft={...row,bounds:data.bounds.slice(),orders:data.orders.map(o=>({number:o.orderNo||o.id,date:o.date,net:orderNetSales(o),commission:orderCommission(o),rate:Number(o.salesperson.rate)||0,commissionType:o.salesperson.commissionType}))};
+  document.getElementById('employeeSlipSummary').textContent=`${row.name} • ${data.bounds[0]} ถึง ${data.bounds[1]} • ${row.count} ออเดอร์ • ค่าคอมมิชชั่น ฿${row.commission.toLocaleString()}`;
+  document.getElementById('employeeSlipDate').value=today();document.getElementById('employeeSlipNote').value='';openModal('employeeSlipModal');
+}
+function employeeSlipHtml(d,form,shop){
+  const esc=v=>safeStaffText(String(v??''));const baht=n=>'฿'+money2(n).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>สลิปค่าคอมมิชชั่น ${esc(d.name)}</title><style>body{font-family:Tahoma,Arial,sans-serif;color:#222;margin:32px;line-height:1.6}main{max-width:800px;margin:auto}h1{font-size:23px}table{width:100%;border-collapse:collapse;margin:18px 0}td,th{padding:9px;border-bottom:1px solid #ddd;text-align:left}th{background:#f4f4f4}tr{break-inside:avoid}.amount{font-size:22px;font-weight:bold;background:#f4f4f4;padding:16px}.signatures{display:flex;justify-content:space-between;margin-top:60px;gap:30px}.toolbar{text-align:right}@page{size:A4;margin:15mm}@media print{body{margin:0}.toolbar{display:none}thead{display:table-header-group}}</style></head><body><main><div class="toolbar"><button onclick="window.print()">พิมพ์ / บันทึก PDF</button></div><h1>สลิปจ่ายค่าคอมมิชชั่นพนักงาน</h1><h2>${esc(shop.name||'Long Do Cafe & Bakery')}</h2><p>${esc(shop.address||'')} ${esc(shop.phone||'')}</p><p>พนักงาน: <b>${esc(d.name)}</b><br>ช่วงวันที่นำมาคำนวณ: <b>${esc(d.bounds[0])} ถึง ${esc(d.bounds[1])}</b> (รวมทั้งสองวัน)<br>วันที่จ่าย: ${esc(form.date)}<br>วิธีจ่าย: ${esc(form.method)}<br>ผู้จ่าย: ${esc(form.payer||'________________')}</p><table><tbody><tr><td>จำนวนออเดอร์</td><td>${d.count}</td></tr>${[['ยอดขายหลังส่วนลด',d.sales],['หัก GP',d.gp],['หักโฆษณา + แคมเปญที่แบ่งให้ออเดอร์',d.ads],['ยอดขายสุทธิ',d.net],['ค่าคอมมิชชั่นรวม',d.commission]].map(([label,n])=>`<tr><td>${label}</td><td>${baht(n)}</td></tr>`).join('')}</tbody></table><div class="amount">ยอดจ่ายค่าคอมมิชชั่น: ${baht(d.commission)}</div><p>เปอร์เซ็นต์คำนวณจากยอดสุทธิของแต่ละออเดอร์ (ฐานไม่ต่ำกว่า 0) แบบบาทต่อออเดอร์ใช้อัตราคงที่ โดยใช้อัตราที่บันทึกไว้ขณะขาย</p><p>หมายเหตุ: ${esc(form.note||'—')}</p><table><thead><tr><th>ออเดอร์</th><th>วันที่</th><th>ยอดสุทธิ</th><th>อัตรา</th><th>ค่าคอมมิชชั่น</th></tr></thead><tbody>${d.orders.map(o=>`<tr><td>#${esc(o.number)}</td><td>${esc(o.date)}</td><td>${baht(o.net)}</td><td>${esc(o.rate)}${o.commissionType==='pct'?'%':' บาท/ออเดอร์'}</td><td>${baht(o.commission)}</td></tr>`).join('')||'<tr><td colspan="5">ไม่มีออเดอร์</td></tr>'}</tbody></table><div class="signatures"><div>ลงชื่อ __________________ ผู้จ่าย<br>วันที่ __________________</div><div>ลงชื่อ __________________ ผู้รับเงิน<br>วันที่ __________________</div></div></main></body></html>`;
+}
+function printEmployeeSlip(){
+  if(!employeeSlipDraft)return;const form={date:document.getElementById('employeeSlipDate').value,method:document.getElementById('employeeSlipMethod').value,payer:document.getElementById('employeeSlipPayer').value.trim(),note:document.getElementById('employeeSlipNote').value.trim()};
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(form.date)||Number.isNaN(Date.parse(form.date))||new Date(form.date).toISOString().slice(0,10)!==form.date){showToast('ระบุวันที่จ่ายให้ถูกต้อง','error');return;}
+  const w=window.open('','_blank');if(!w){showToast('กรุณาอนุญาตป๊อปอัปเพื่อเปิดสลิป','error');return;}w.document.open();w.document.write(employeeSlipHtml(employeeSlipDraft,form,DB.get('shopInfo',{})));w.document.close();
 }

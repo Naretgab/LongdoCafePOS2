@@ -881,6 +881,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
       <div class="nav-section">จัดการร้าน</div>
       <div class="nav-item" onclick="showPage('menu')"><span class="icon">☕</span> เมนูสินค้า</div>
       <div class="nav-item" onclick="showPage('categories')"><span class="icon">🏷️</span> หมวดหมู่</div>
+      <div class="nav-item" onclick="showPage('staff')"><span class="icon">👤</span> พนักงาน</div>
       <div class="nav-item" onclick="showPage('customers')"><span class="icon">👥</span> ลูกค้า</div>
       <div class="nav-item" onclick="showPage('promotions')"><span class="icon">🎁</span> โปรโมชั่น</div>
       <div class="nav-section">สต็อก & ต้นทุน</div>
@@ -1188,6 +1189,23 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
       </div>
     </div>
 
+<div id="page-staff" class="page"><div class="content">
+<div class="card"><div class="card-header"><div class="card-title">👤 พนักงาน — ยอดขายและค่าคอมมิชชั่น</div></div>
+<div class="tabs" style="flex-wrap:wrap;"><button class="tab-btn active" onclick="switchStaffPeriod('day',this)">รายวัน</button><button class="tab-btn " onclick="switchStaffPeriod('month',this)">รายเดือน</button><button class="tab-btn " onclick="switchStaffPeriod('year',this)">รายปี</button><button class="tab-btn " onclick="switchStaffPeriod('custom',this)">กำหนดเอง</button></div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><input class="form-control" type="date" id="employeeDayPicker" onchange="renderEmployeePage()" style="width:155px;display:none;" aria-label="วันที่"><input class="form-control" type="month" id="employeeMonthPicker" onchange="renderEmployeePage()" style="width:155px;display:none;" aria-label="เดือน"><input class="form-control" type="number" id="employeeYearPicker" onchange="renderEmployeePage()" style="width:155px;display:none;" aria-label="ปี"><input class="form-control" type="date" id="employeeCustomStart" onchange="renderEmployeePage()" style="width:155px;display:none;" aria-label="วันเริ่มต้น"><input class="form-control" type="date" id="employeeCustomEnd" onchange="renderEmployeePage()" style="width:155px;display:none;" aria-label="วันสิ้นสุด"><span id="employeeCustomSep" style="display:none;">ช่วงวันที่เริ่มต้น–สิ้นสุด</span><button class="btn btn-ghost btn-sm" onclick="resetPeriodPickerToNow('employee',reportPeriod.staff||'day',renderEmployeePage)">ปัจจุบัน</button><select class="form-control" id="employeeFilter" aria-label="กรองพนักงาน" onchange="renderEmployeePage()" style="width:220px;"></select></div><p id="employeePeriodLabel"></p><div id="employeeStats" class="grid-4"></div><p id="employeeAllocationNote" style="color:var(--caramel);"></p><div class="table-wrap"><table><thead><tr><th>พนักงาน</th><th>ออเดอร์</th><th>ยอดขายหลังส่วนลด</th><th>GP</th><th>โฆษณา + แคมเปญที่แบ่ง</th><th>ยอดขายสุทธิ</th><th>ค่าคอมมิชชั่น</th><th>สลิป</th></tr></thead><tbody id="employeeSummary"></tbody></table></div></div>
+<div class="card" style="margin-top:16px;"><div class="card-title">ออเดอร์ของพนักงานในช่วงที่เลือก</div><div class="table-wrap"><table><thead><tr><th>ออเดอร์</th><th>วันที่</th><th>พนักงาน</th><th>ช่องทาง</th><th>ยอดหลังส่วนลด</th><th>ยอดสุทธิ</th><th>ค่าคอมมิชชั่น</th></tr></thead><tbody id="employeeOrders"></tbody></table></div></div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">👤 พนักงานขายและค่าคอมมิชชั่น</div></div>
+            <p>เปอร์เซ็นต์คิดจากยอดขายสุทธิหลังหักส่วนลด GP และค่าโฆษณา + แคมเปญที่แบ่งให้ออเดอร์ หรือเลือกบาทต่อออเดอร์ อัตราที่เปลี่ยนมีผลกับการขายครั้งถัดไปเท่านั้น</p>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <input class="form-control" id="staffName" placeholder="ชื่อพนักงาน" aria-label="ชื่อพนักงาน">
+              <select class="form-control" id="staffCommissionType"><option value="pct">เปอร์เซ็นต์ (%)</option><option value="thb">บาทต่อออเดอร์</option></select>
+              <input class="form-control" id="staffCommissionRate" type="number" min="0" step="0.01" value="0" aria-label="อัตราคอมมิชชั่น" style="width:100px;">
+              <button type="button" id="staffSaveButton" class="btn btn-primary" onclick="addSalesperson()">💾 บันทึกพนักงาน</button>
+            </div>
+            <div id="staffSaveStatus" role="status" aria-live="polite" style="margin-top:10px;font-size:0.85rem;"></div>
+            <div id="staffList" class="table-wrap" style="margin-top:12px;"></div>
+          </div>
+</div></div>
     <!-- ========== PAGE: EXPENSES ========== -->
     <div id="page-expenses" class="page">
       <div class="content">
@@ -1377,18 +1395,6 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     <div id="page-settings" class="page">
       <div class="content">
         <div class="grid-2">
-          <div class="card">
-            <div class="card-header"><div class="card-title">👤 พนักงานขายและค่าคอมมิชชั่น</div></div>
-            <p>เปอร์เซ็นต์คิดจากยอดขายสุทธิหลังหักส่วนลด GP และค่าโฆษณา + แคมเปญที่แบ่งให้ออเดอร์ หรือเลือกบาทต่อออเดอร์ อัตราที่เปลี่ยนมีผลกับการขายครั้งถัดไปเท่านั้น</p>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <input class="form-control" id="staffName" placeholder="ชื่อพนักงาน" aria-label="ชื่อพนักงาน">
-              <select class="form-control" id="staffCommissionType"><option value="pct">เปอร์เซ็นต์ (%)</option><option value="thb">บาทต่อออเดอร์</option></select>
-              <input class="form-control" id="staffCommissionRate" type="number" min="0" step="0.01" value="0" aria-label="อัตราคอมมิชชั่น" style="width:100px;">
-              <button type="button" id="staffSaveButton" class="btn btn-primary" onclick="addSalesperson()">💾 บันทึกพนักงาน</button>
-            </div>
-            <div id="staffSaveStatus" role="status" aria-live="polite" style="margin-top:10px;font-size:0.85rem;"></div>
-            <div id="staffList" class="table-wrap" style="margin-top:12px;"></div>
-          </div>
           <div class="card"><div class="card-title">เชื่อมต่อ GPT อ่านออเดอร์</div>
           <p>API key ตั้งไว้บน Supabase เท่านั้น กรอก URL ฟังก์ชันและรหัสเชื่อมต่อที่ผู้ดูแลกำหนด</p>
           <label>URL ฟังก์ชัน<input class="form-control" id="aiEndpoint" placeholder="https://PROJECT.supabase.co/functions/v1/pos-read-order"></label>
@@ -2081,7 +2087,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 <div class="modal-overlay" id="adExpenseModal"><div class="modal"><div class="modal-header"><h3>บันทึกโฆษณา + แคมเปญ</h3><button class="btn btn-ghost" onclick="closeModal('adExpenseModal')">✕</button></div>
 <label>ประเภท<select class="form-control" id="adKind"><option value="advertisement">โฆษณา</option><option value="campaign">แคมเปญ</option></select></label><label>วันที่ลงโฆษณา / แคมเปญ<input class="form-control" type="date" id="adDate"></label><label>ช่องทาง<select class="form-control" id="adChannel"><option value="instore">หน้าร้าน</option><option value="grab">Grab</option><option value="lineman">LINE MAN</option></select></label><label>ชื่อรายการ<input class="form-control" id="adName" placeholder="เช่น โฆษณา Grab"></label><label>จำนวนเงิน (บาท)<input class="form-control" type="number" min="0.01" step="0.01" id="adAmount"></label><label>หมายเหตุ<input class="form-control" id="adNote"></label><p>ค่าโฆษณา + แคมเปญจะหักจากยอดขายสุทธิ และแบ่งเฉพาะออเดอร์ที่ติ๊กโฆษณาในวันและช่องทางนี้ กรณีครอบคลุมหลายวันให้บันทึกแยกแต่ละวัน</p><div id="adSaveStatus" role="status" style="color:var(--red);"></div><button class="btn btn-primary" onclick="saveAdExpense()">บันทึกโฆษณา + แคมเปญ</button></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="supabase-sync.js?v=32"></script>
-<script src="app.js?v=32"></script>
+<div class="modal-overlay" id="employeeSlipModal"><div class="modal"><div class="modal-header"><h3>สลิปจ่ายค่าคอมมิชชั่นพนักงาน</h3><button class="btn btn-ghost" onclick="closeModal('employeeSlipModal')">✕</button></div><p id="employeeSlipSummary"></p><label>วันที่จ่าย<input class="form-control" type="date" id="employeeSlipDate"></label><label>วิธีจ่าย<select class="form-control" id="employeeSlipMethod"><option>โอนเงิน</option><option>เงินสด</option><option>อื่น ๆ</option></select></label><label>ชื่อผู้จ่าย<input class="form-control" id="employeeSlipPayer"></label><label>หมายเหตุ<input class="form-control" id="employeeSlipNote"></label><p>ยอดจ่ายในสลิปเป็นค่าคอมมิชชั่นจากออเดอร์ที่เลือก การสร้างสลิปไม่บันทึกรายจ่ายซ้ำหรือสถานะการชำระเงิน</p><button class="btn btn-primary" onclick="printEmployeeSlip()">🖨️ พิมพ์ / บันทึก PDF</button></div></div>
+<script src="supabase-sync.js?v=33"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>
