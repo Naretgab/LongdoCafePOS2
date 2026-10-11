@@ -277,7 +277,7 @@ function showPage(name) {
   if(name==='report-sales') renderSalesReport();
   if(name==='report-profit') renderProfitReport();
   if(name==='report-products') renderTopProductsReport();
-  if(name==='settings') { loadSettings(); renderStaffControls(); loadAIConnection(); }
+  if(name==='settings') { loadSettings(); renderStaffControls(); loadAIConnection(); loadLineConnection(); }
 }
 
 function toggleSidebar() {
@@ -4343,3 +4343,25 @@ function printEmployeeSlip(){
   const w=window.open('','_blank');if(!w){showToast('กรุณาอนุญาตป๊อปอัปเพื่อเปิดสลิป','error');return;}w.document.open();w.document.write(employeeSlipHtml(employeeSlipDraft,form,DB.get('shopInfo',{})));w.document.close();
 }
 
+
+// Manual LINE group sales summary — no AI calls.
+function buildLineSalesSummary(period,key){
+ const orders=getFilteredOrders(period,key),gp=DB.get('gpSettings',{instore:0,grab:32.1,lineman:32.1}),menus=new Map(DB.get('menus').map(m=>[m.id,m])),ads=getPeriodAds(period,key),bounds=employeePeriodBounds(period,key);
+ const sales=money2(orders.reduce((s,o)=>s+o.total,0)),fee=money2(orders.reduce((s,o)=>s+getOrderGpAmount(o,gp),0)),adCost=money2(ads.reduce((s,a)=>s+a.amount,0)),net=money2(sales-fee-adCost),expenses=money2(getAllExpenses().filter(e=>dateMatchesPeriod(e.date,period,key)).reduce((s,e)=>s+e.amount,0));
+ const cost=money2(orders.reduce((s,o)=>s+(o.items||[]).reduce((n,i)=>n+(menus.has(i.id)?(menus.get(i.id).cost||0):(i.cost||0))*i.qty,0),0));
+ const staff=new Map();orders.forEach(o=>{if(!o.salesperson)return;const id=String(o.salesperson.id);if(!staff.has(id))staff.set(id,{name:o.salesperson.name,count:0,commission:0});const p=staff.get(id);p.count++;p.commission+=orderCommission(o);});
+ return {shop:DB.get('shopInfo',{}).name||'Long Do Cafe & Bakery',start:bounds[0],end:bounds[1],count:orders.length,items:orders.reduce((s,o)=>s+(o.items||[]).reduce((n,i)=>n+(Number(i.qty)||0),0),0),sales,discount:money2(orders.reduce((s,o)=>s+(o.discount||0),0)),gp:fee,ads:adCost,net,cost,expenses,commission:money2(orders.reduce((s,o)=>s+orderCommission(o),0)),profit:money2(net-cost-expenses),channels:['instore','grab','lineman'].map(ch=>{const rows=orders.filter(o=>(o.type||'instore')===ch);return {count:rows.length,net:money2(rows.reduce((s,o)=>s+orderAfterGp(o),0)-ads.filter(a=>a.channel===ch).reduce((s,a)=>s+a.amount,0))};}),staff:[...staff.values()].map(p=>({...p,commission:money2(p.commission)}))};
+}
+function loadLineConnection(){document.getElementById('lineEndpoint').value=DB.get('lineConnection',{}).endpoint||'';document.getElementById('lineAccessToken').value=sessionStorage.getItem('ld_lineReportToken')||'';}
+function saveLineConnection(){try{const endpoint=document.getElementById('lineEndpoint').value.trim(),url=new URL(endpoint),token=document.getElementById('lineAccessToken').value.trim();if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw Error('URL ต้องเป็น HTTPS และไม่มีรหัสหรือพารามิเตอร์');if(!token)throw Error('กรอกรหัสเชื่อมต่อ LINE_REPORT_TOKEN');if(!DB.set('lineConnection',{endpoint}))return;sessionStorage.setItem('ld_lineReportToken',token);document.getElementById('lineConnectionStatus').textContent='บันทึกแล้ว — กรอกรหัสใหม่เมื่อปิดแท็บ';}catch(e){document.getElementById('lineConnectionStatus').textContent=e.message;}}
+let lineReportDraft=null,lineReportBusy=false;
+async function lineReportRequest(body){const endpoint=DB.get('lineConnection',{}).endpoint,token=sessionStorage.getItem('ld_lineReportToken');if(!endpoint||!token)throw Error('กรุณาตั้งค่าการเชื่อมต่อ LINE ในหน้าตั้งค่าระบบก่อน');const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','x-pos-line-token':token},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});let data;try{data=await r.json();}catch{throw Error('เซิร์ฟเวอร์ส่งข้อมูลไม่ถูกต้อง ตรวจ URL ฟังก์ชัน LINE');}if(!r.ok)throw Error(data.error||'เชื่อมต่อ LINE ไม่สำเร็จ');return data;}
+async function openLineSalesSummary(){
+ if(lineReportBusy){openModal('lineReportModal');return;}
+ lineReportDraft=null;document.getElementById('lineReportText').textContent='';document.getElementById('lineReportGroup').textContent='';document.getElementById('lineReportSend').disabled=true;document.getElementById('lineReportStatus').textContent='กำลังสร้างสรุปและตรวจกลุ่มปลายทาง…';openModal('lineReportModal');lineReportBusy=true;
+ try{const period=reportPeriod.sales||'day',key=syncSalesPickers(period),summary=buildLineSalesSummary(period,key),result=await lineReportRequest({action:'preview',summary});lineReportDraft={summary,groupId:result.groupId,retryKey:crypto.randomUUID()};document.getElementById('lineReportText').textContent=result.text;document.getElementById('lineReportGroup').textContent='กลุ่มปลายทาง: '+result.groupName;document.getElementById('lineReportStatus').textContent='ตรวจข้อความแล้วกดส่งเข้ากลุ่ม ใช้ข้อมูล POS ขณะสร้างสรุป';document.getElementById('lineReportSend').disabled=false;}catch(e){document.getElementById('lineReportStatus').textContent=e.message;}finally{lineReportBusy=false;}
+}
+async function sendLineSalesSummary(){
+ if(lineReportBusy||!lineReportDraft)return;lineReportBusy=true;document.getElementById('lineReportSend').disabled=true;document.getElementById('lineReportStatus').textContent='กำลังส่งเข้า LINE…';
+ try{const result=await lineReportRequest({action:'send',...lineReportDraft});if(!result.accepted)throw Error('ยังไม่ได้รับการยืนยันจาก LINE');lineReportDraft=null;document.getElementById('lineReportStatus').textContent='LINE รับคำขอส่งสรุปแล้ว';showToast('LINE รับคำขอส่งแล้ว','success');}catch(e){document.getElementById('lineReportStatus').textContent=e.message+' — กดส่งอีกครั้งได้ ระบบใช้รหัสเดิมป้องกันข้อความซ้ำ';document.getElementById('lineReportSend').disabled=false;}finally{lineReportBusy=false;}
+}

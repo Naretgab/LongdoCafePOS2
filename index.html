@@ -1266,7 +1266,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
             <button class="btn btn-ghost btn-sm" onclick="resetSalesPickerToNow()">ปัจจุบัน</button>
           </div>
         </div>
-        <div class="grid-4" id="salesStatCards"></div>
+        <div style="margin-bottom:16px;"><button class="btn btn-primary" onclick="openLineSalesSummary()">💬 สรุปยอดขายส่งเข้า LINE กลุ่ม</button><p style="font-size:0.8rem;color:var(--muted);">ใช้ช่วงวันที่ที่เลือกด้านบน กรุณาซิงค์ข้อมูลให้ครบก่อนสร้างสรุป</p></div><div class="grid-4" id="salesStatCards"></div>
         <div class="card" style="margin-top:16px;">
           <div class="card-header"><div class="card-title">กราฟยอดขาย</div></div>
           <div class="chart-bar" id="salesChart"></div>
@@ -1401,6 +1401,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
           <label>รหัสเชื่อมต่อ AI<input class="form-control" id="aiAccessToken" type="password" autocomplete="off"></label>
           <p>รหัสเชื่อมต่อเก็บเฉพาะแท็บนี้ ปิดแท็บแล้วต้องกรอกใหม่</p>
           <button class="btn btn-primary" type="button" onclick="saveAIConnection()">บันทึกการเชื่อมต่อ</button><div id="aiConnectionStatus" role="status"></div></div>
+<div class="card"><div class="card-title">💬 เชื่อมต่อ LINE กลุ่ม — สรุปยอดขาย</div><p>ตั้งค่า LINE OA token และกลุ่มบน Supabase ตามไฟล์ LINE-SETUP.md ช่องนี้ใช้รหัส LINE_REPORT_TOKEN เท่านั้น</p><label>URL ฟังก์ชัน<input class="form-control" id="lineEndpoint" placeholder="https://PROJECT.supabase.co/functions/v1/pos-line-summary"></label><label>รหัสเชื่อมต่อ POS → LINE<input class="form-control" type="password" id="lineAccessToken" autocomplete="off"></label><button class="btn btn-primary" onclick="saveLineConnection()">บันทึกการเชื่อมต่อ LINE</button><p id="lineConnectionStatus" role="status"></p></div>
           <!-- Data Backup -->
           <div class="card">
             <div class="card-header"><div class="card-title">🗄️ สำรอง / นำเข้าข้อมูล</div></div>
@@ -2088,7 +2089,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 <label>ประเภท<select class="form-control" id="adKind"><option value="advertisement">โฆษณา</option><option value="campaign">แคมเปญ</option></select></label><label>วันที่ลงโฆษณา / แคมเปญ<input class="form-control" type="date" id="adDate"></label><label>ช่องทาง<select class="form-control" id="adChannel"><option value="instore">หน้าร้าน</option><option value="grab">Grab</option><option value="lineman">LINE MAN</option></select></label><label>ชื่อรายการ<input class="form-control" id="adName" placeholder="เช่น โฆษณา Grab"></label><label>จำนวนเงิน (บาท)<input class="form-control" type="number" min="0.01" step="0.01" id="adAmount"></label><label>หมายเหตุ<input class="form-control" id="adNote"></label><p>ค่าโฆษณา + แคมเปญจะหักจากยอดขายสุทธิ และแบ่งเฉพาะออเดอร์ที่ติ๊กโฆษณาในวันและช่องทางนี้ กรณีครอบคลุมหลายวันให้บันทึกแยกแต่ละวัน</p><div id="adSaveStatus" role="status" style="color:var(--red);"></div><button class="btn btn-primary" onclick="saveAdExpense()">บันทึกโฆษณา + แคมเปญ</button></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <div class="modal-overlay" id="employeeSlipModal"><div class="modal"><div class="modal-header"><h3>สลิปจ่ายค่าคอมมิชชั่นพนักงาน</h3><button class="btn btn-ghost" onclick="closeModal('employeeSlipModal')">✕</button></div><p id="employeeSlipSummary"></p><label>วันที่จ่าย<input class="form-control" type="date" id="employeeSlipDate"></label><label>วิธีจ่าย<select class="form-control" id="employeeSlipMethod"><option>โอนเงิน</option><option>เงินสด</option><option>อื่น ๆ</option></select></label><label>ชื่อผู้จ่าย<select class="form-control" id="employeeSlipPayer" aria-label="ชื่อผู้จ่าย"></select></label><label>หมายเหตุ<input class="form-control" id="employeeSlipNote"></label><p>ยอดจ่ายในสลิปเป็นค่าคอมมิชชั่นจากออเดอร์ที่เลือก การสร้างสลิปไม่บันทึกรายจ่ายซ้ำหรือสถานะการชำระเงิน</p><button class="btn btn-primary" onclick="printEmployeeSlip()">🖨️ พิมพ์ / บันทึก PDF</button></div></div>
-<script src="supabase-sync.js?v=39"></script>
-<script src="app.js?v=39"></script>
+<div class="modal-overlay" id="lineReportModal"><div class="modal"><div class="modal-header"><h3>ส่งสรุปยอดขายเข้า LINE กลุ่ม</h3><button class="btn btn-ghost" onclick="closeModal('lineReportModal')">✕</button></div><p id="lineReportGroup" style="font-weight:bold;"></p><pre id="lineReportText" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto;font-family:inherit;"></pre><p id="lineReportStatus" role="status"></p><button class="btn btn-primary" id="lineReportSend" disabled onclick="sendLineSalesSummary()">ยืนยันส่งเข้ากลุ่ม LINE</button></div></div>
+<script src="supabase-sync.js?v=40"></script>
+<script src="app.js?v=40"></script>
 </body>
 </html>
