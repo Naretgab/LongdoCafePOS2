@@ -1375,7 +1375,7 @@ function renderOrdersTable() {
       <td>${o.date} ${o.time}</td>
       <td>${safeStaffText(o.customer?.name||'—')}</td>
       <td><span class="pill ${o.type==='grab'?'pill-green':o.type==='lineman'?'pill-gold':'pill-blue'}">${o.type==='grab'?'Grab':o.type==='lineman'?'LINE MAN':'หน้าร้าน'}</span>${o.refNo?`<div style="font-size:0.72rem;color:var(--muted);font-weight:700;margin-top:2px;">#${safeStaffText(o.refNo)}</div>`:''}</td>
-      <td>${safeStaffText(o.salesperson?.name||'—')}</td>
+      <td>${orderSalespersonDropdown(o)}</td>
       <td>${o.isAdvertisement?'📣 โฆษณา':'—'}</td>
       <td><input aria-label="ส่วนลดรวมออเดอร์ ${o.orderNo} (บาท)" type="number" min="0" max="${o.subtotal}" step="0.01" value="${o.discount||0}" style="width:90px;" ${o.status==='cancelled'?'disabled':''} onchange="updateOrderDiscount(${o.id},this.value)"></td>
       <td>${o.items.reduce((s,i)=>s+(i.qty||1),0)} รายการ</td>
@@ -4367,4 +4367,20 @@ async function openLineSalesSummary(){
 async function sendLineSalesSummary(){
  if(lineReportBusy||!lineReportDraft)return;lineReportBusy=true;document.getElementById('lineReportSend').disabled=true;document.getElementById('lineReportStatus').textContent='กำลังส่งเข้า LINE…';
  try{const result=await lineReportRequest({action:'send',...lineReportDraft});if(!result.accepted)throw Error('ยังไม่ได้รับการยืนยันจาก LINE');lineReportDraft=null;document.getElementById('lineReportStatus').textContent='LINE รับคำขอส่งสรุปแล้ว';showToast('LINE รับคำขอส่งแล้ว','success');}catch(e){document.getElementById('lineReportStatus').textContent=e.message+' — กดส่งอีกครั้งได้ ระบบใช้รหัสเดิมป้องกันข้อความซ้ำ';document.getElementById('lineReportSend').disabled=false;}finally{lineReportBusy=false;}
+}
+
+function orderSalespersonDropdown(o){
+ const people=DB.get('salespeople').filter(p=>!p.inactive),current=o.salesperson;
+ const options='<option value="">ไม่ระบุพนักงาน</option>'+people.map(p=>`<option value="${safeStaffText(String(p.id))}" ${String(current?.id)===String(p.id)?'selected':''}>${safeStaffText(String(current?.id)===String(p.id)?current.name:p.name)}</option>`).join('')+(current&&!people.some(p=>String(p.id)===String(current.id))?`<option value="${safeStaffText(String(current.id))}" selected>${safeStaffText(current.name)} (ประวัติ)</option>`:'');
+ return `<select class="form-control" aria-label="พนักงานออเดอร์ ${safeStaffText(String(o.orderNo||o.id))}" style="min-width:150px;" ${o.status==='cancelled'?'disabled':''} onchange="updateOrderSalesperson(${o.id},this.value)">${options}</select>`;
+}
+function updateOrderSalesperson(id,staffId){
+ const orders=DB.get('orders'),order=orders.find(o=>o.id===id);if(!order||order.status==='cancelled'){renderOrdersTable();return;}
+ if(String(order.salesperson?.id??'')===String(staffId))return;
+ const person=staffId===''?null:DB.get('salespeople').find(p=>String(p.id)===String(staffId)&&!p.inactive);
+ if(staffId!==''&&!person){showToast('พนักงานนี้ไม่อยู่ในรายการที่ใช้งาน กรุณาเลือกใหม่','error');renderOrdersTable();return;}
+ order.salesperson=person?{id:person.id,name:person.name,commissionType:person.commissionType,rate:person.rate}:null;
+ if(!DB.set('orders',orders)){renderOrdersTable();return;}
+ if(editingOrderId===id){selectedSalesperson=order.salesperson?{...order.salesperson}:null;renderStaffControls();}
+ renderOrdersTable();showToast('บันทึกพนักงานและคำนวณค่าคอมมิชชั่นใหม่แล้ว','success');
 }
