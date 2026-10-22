@@ -1402,6 +1402,15 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
           <p>รหัสเชื่อมต่อเก็บเฉพาะแท็บนี้ ปิดแท็บแล้วต้องกรอกใหม่</p>
           <button class="btn btn-primary" type="button" onclick="saveAIConnection()">บันทึกการเชื่อมต่อ</button><div id="aiConnectionStatus" role="status"></div></div>
 <div class="card"><div class="card-title">💬 เชื่อมต่อ LINE กลุ่ม — สรุปยอดขาย</div><p>ตั้งค่า LINE OA token และกลุ่มบน Supabase ตามไฟล์ LINE-SETUP.md ช่องนี้ใช้รหัส LINE_REPORT_TOKEN เท่านั้น</p><label>URL ฟังก์ชัน<input class="form-control" id="lineEndpoint" placeholder="https://PROJECT.supabase.co/functions/v1/pos-line-summary"></label><label>รหัสเชื่อมต่อ POS → LINE<input class="form-control" type="password" id="lineAccessToken" autocomplete="off"></label><button class="btn btn-primary" onclick="saveLineConnection()">บันทึกการเชื่อมต่อ LINE</button><p id="lineConnectionStatus" role="status"></p></div>
+          <!-- Cloud sync reconcile -->
+          <div class="card">
+            <div class="card-header"><div class="card-title">☁️ อัปเดตข้อมูลขึ้น Supabase</div></div>
+            <div style="font-size:0.8rem;color:var(--muted);margin-bottom:14px;">ตรวจเทียบข้อมูลในเครื่องนี้กับคลาวด์ (ออเดอร์, ลูกค้า, เมนู, วัตถุดิบ, โปรโมชั่น, รายจ่าย, ตั้งค่า ฯลฯ) แล้วส่งรายการที่ตกหล่นหรือต่างจากคลาวด์ขึ้นไป ไม่มีการลบข้อมูลบนคลาวด์ · รูปโลโก้/QR ไม่รวม</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-primary" id="btnCloudCompare" onclick="cloudSyncCompare()">☁️ ตรวจสอบและอัปเดตข้อมูล</button>
+            </div>
+            <div id="cloudSyncResult" role="status" style="font-size:0.82rem;margin-top:12px;"></div>
+          </div>
           <!-- Data Backup -->
           <div class="card">
             <div class="card-header"><div class="card-title">🗄️ สำรอง / นำเข้าข้อมูล</div></div>
@@ -2090,7 +2099,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <div class="modal-overlay" id="employeeSlipModal"><div class="modal"><div class="modal-header"><h3>สลิปจ่ายค่าคอมมิชชั่นพนักงาน</h3><button class="btn btn-ghost" onclick="closeModal('employeeSlipModal')">✕</button></div><p id="employeeSlipSummary"></p><label>วันที่จ่าย<input class="form-control" type="date" id="employeeSlipDate"></label><label>วิธีจ่าย<select class="form-control" id="employeeSlipMethod"><option>โอนเงิน</option><option>เงินสด</option><option>อื่น ๆ</option></select></label><label>ชื่อผู้จ่าย<select class="form-control" id="employeeSlipPayer" aria-label="ชื่อผู้จ่าย"></select></label><label>หมายเหตุ<input class="form-control" id="employeeSlipNote"></label><p>ยอดจ่ายในสลิปเป็นค่าคอมมิชชั่นจากออเดอร์ที่เลือก การสร้างสลิปไม่บันทึกรายจ่ายซ้ำหรือสถานะการชำระเงิน</p><button class="btn btn-primary" onclick="printEmployeeSlip()">🖨️ พิมพ์ / บันทึก PDF</button></div></div>
 <div class="modal-overlay" id="lineReportModal"><div class="modal"><div class="modal-header"><h3>ส่งสรุปยอดขายเข้า LINE กลุ่ม</h3><button class="btn btn-ghost" onclick="closeModal('lineReportModal')">✕</button></div><p id="lineReportGroup" style="font-weight:bold;"></p><pre id="lineReportText" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto;font-family:inherit;"></pre><p id="lineReportStatus" role="status"></p><button class="btn btn-primary" id="lineReportSend" disabled onclick="sendLineSalesSummary()">ยืนยันส่งเข้ากลุ่ม LINE</button></div></div>
-<script src="supabase-sync.js?v=42"></script>
-<script src="app.js?v=42"></script>
+<script src="supabase-sync.js?v=43"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>

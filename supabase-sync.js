@@ -205,6 +205,133 @@ const SyncEngine = (() => {
     }
   }
 
+
+  // ดึงทุกแถวของตาราง (Supabase จำกัด 1000 แถว/คำขอ จึงต้องแบ่งหน้า)
+  async function fetchAll(table, size = 1000) {
+    let all = [], from = 0;
+    for (;;) {
+      const { data, error } = await client.from(table).select('*').order('id', { ascending: true }).range(from, from + size - 1);
+      if (error) throw error;
+      all = all.concat(data || []);
+      if (!data || data.length < size) break;
+      from += size;
+    }
+    return all;
+  }
+
+  // ── ปุ่ม "อัปเดตข้อมูลขึ้น Supabase" (manual full reconcile) ─────────
+  // compare(): อ่านจากคลาวด์อย่างเดียว ไม่เขียนอะไร → คืนรายงาน
+  // apply(report, includeDiff): ดันข้อมูลในเครื่องนี้ขึ้นคลาวด์ (upsert เท่านั้น ไม่ลบอะไรบนคลาวด์)
+  function normV(v) {
+    if (v === undefined || v === null || v === '') return null;
+    if (typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v.trim())) return Number(v);
+    if (Array.isArray(v)) return v.map(normV);
+    if (typeof v === 'object') { const o = {}; Object.keys(v).sort().forEach(k => { o[k] = normV(v[k]); }); return o; }
+    return v;
+  }
+  function sameVal(a, b) { return JSON.stringify(normV(a)) === JSON.stringify(normV(b)); }
+  function rowsEqual(localRow, remoteRow) {
+    for (const k of Object.keys(localRow)) {
+      if (k === 'updated_at') continue;
+      if (!sameVal(localRow[k], remoteRow[k])) return false;
+    }
+    return true;
+  }
+
+  function isReady() { return ready; }
+
+  async function compare() {
+    if (!ready) throw new Error('ยังไม่ได้เชื่อมต่อ Supabase (หรือโหลด supabase-js ไม่สำเร็จ)');
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('ขณะนี้ออฟไลน์ — ต่ออินเทอร์เน็ตก่อน');
+    const report = { tables: [], settings: [], errors: [], queued: loadQueue().length };
+
+    for (const key of Object.keys(SYNC_TABLES)) {
+      const table = SYNC_TABLES[key];
+      try {
+        const remote = await fetchAll(table);
+        const rmap = new Map(remote.map(r => [String(r.id), r]));
+        const local = DB.get(key);
+        const missing = [], diff = [];
+        for (const rec of local) {
+          const row = toRow[key](rec);
+          const rr = rmap.get(String(rec.id));
+          if (!rr) missing.push(row);
+          else if (!rowsEqual(row, rr)) diff.push(row);
+        }
+        report.tables.push({ key, table, localCount: local.length, remoteCount: remote.length, missing, diff });
+      } catch (e) {
+        report.errors.push({ name: table, message: e.message || String(e) });
+      }
+    }
+
+    try {
+      const { data: srows, error } = await client.from('settings').select('*');
+      if (error) throw error;
+      const rmap = new Map((srows || []).map(r => [r.key, r.value]));
+      for (const key of SETTINGS_KEYS) {
+        const raw = localStorage.getItem('ld_' + key);
+        if (raw === null) continue;
+        let value; try { value = JSON.parse(raw); } catch { continue; }
+        const has = rmap.has(key);
+        if (!has) { report.settings.push({ key, value, status: 'missing' }); continue; }
+        const rv = rmap.get(key);
+        // orderSeq: ห้ามถอยหลัง — ถ้าคลาวด์มากกว่าหรือเท่ากันถือว่าตรงกัน
+        if (key === 'orderSeq') { if (Number(value) > Number(rv)) report.settings.push({ key, value, status: 'diff' }); continue; }
+        if (!sameVal(value, rv)) report.settings.push({ key, value, status: 'diff' });
+      }
+    } catch (e) {
+      report.errors.push({ name: 'settings', message: e.message || String(e) });
+    }
+    return report;
+  }
+
+  async function apply(report, includeDiff) {
+    if (!ready) throw new Error('ยังไม่ได้เชื่อมต่อ Supabase');
+    setStatus('syncing');
+    const result = { pushed: 0, errors: [] };
+    const doneKeys = new Set();
+
+    for (const t of report.tables) {
+      const rows = includeDiff ? t.missing.concat(t.diff) : t.missing;
+      if (!rows.length) continue;
+      try {
+        await upsertInBatches(t.table, rows);
+        result.pushed += rows.length;
+        doneKeys.add(t.key);
+      } catch (e) {
+        result.errors.push({ name: t.table, message: e.message || String(e) });
+      }
+    }
+    for (const s of report.settings) {
+      if (s.status === 'diff' && !includeDiff) continue;
+      try {
+        const { error } = await client.from('settings').upsert({ key: s.key, value: s.value, updated_at: new Date().toISOString() });
+        if (error) throw error;
+        result.pushed++;
+        doneKeys.add('setting:' + s.key);
+      } catch (e) {
+        result.errors.push({ name: 'settings/' + s.key, message: e.message || String(e) });
+      }
+    }
+
+    // ล้างงานค้างในคิวที่ซ้ำกับสิ่งที่เพิ่งดันขึ้นไป (กันของเก่าในคิวมาเขียนทับของใหม่) — เก็บคิวลบไว้
+    try {
+      const q = loadQueue().filter(j => {
+        if (j.op === 'upsert') return !(doneKeys.has(j.key) && includeDiff) ;
+        if (j.op === 'setting') return !doneKeys.has('setting:' + j.key);
+        return true;
+      });
+      saveQueue(q);
+      for (const t of report.tables) {
+        if (doneKeys.has(t.key) && includeDiff) localStorage.setItem(SNAP_PREFIX + t.key, JSON.stringify(DB.get(t.key)));
+      }
+    } catch (e) { console.error('[sync] queue cleanup failed', e); }
+
+    setStatus(result.errors.length ? 'error' : 'synced');
+    flushQueue();
+    return result;
+  }
+
   // ── called from DB.set() ──────────────────────────────────────
   function onSet(key, value) {
     if (!ready) return; // local-only mode: nothing to do
@@ -246,8 +373,7 @@ const SyncEngine = (() => {
     for (const key of Object.keys(SYNC_TABLES)) {
       const table = SYNC_TABLES[key];
       try {
-        const { data: rows, error } = await client.from(table).select('*');
-        if (error) throw error;
+        const rows = await fetchAll(table);
         const local = DB.get(key);
 
         if ((!rows || rows.length === 0) && local.length > 0) {
@@ -354,5 +480,5 @@ const SyncEngine = (() => {
     bootstrap();
   }
 
-  return { init, onSet };
+  return { init, onSet, compare, apply, isReady };
 })();

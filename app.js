@@ -4384,3 +4384,57 @@ function updateOrderSalesperson(id,staffId){
  if(editingOrderId===id){selectedSalesperson=order.salesperson?{...order.salesperson}:null;renderStaffControls();}
  renderOrdersTable();showToast('บันทึกพนักงานและคำนวณค่าคอมมิชชั่นใหม่แล้ว','success');
 }
+
+
+// ── ☁️ ปุ่มอัปเดตข้อมูลขึ้น Supabase (ตรวจเทียบ → ยืนยัน → ส่งขึ้น) ──
+let _cloudReport = null;
+const CLOUD_LABELS = {customers:'ลูกค้า',categories:'หมวดหมู่',customerTypes:'ประเภทลูกค้า',addonGroups:'กลุ่มท็อปปิ้ง',ingredients:'วัตถุดิบ',promotions:'โปรโมชั่น',menus:'เมนู',orders:'ออเดอร์',expenses:'รายจ่าย',
+  shopInfo:'ข้อมูลร้าน',gpSettings:'ค่า GP',printerSettings:'เครื่องพิมพ์',expenseCategories:'หมวดรายจ่าย',salespeople:'พนักงาน',adExpenses:'ค่าโฆษณา',orderSeq:'เลขออเดอร์ล่าสุด'};
+function _cloudEsc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+async function cloudSyncCompare(){
+  const box=document.getElementById('cloudSyncResult'), btn=document.getElementById('btnCloudCompare');
+  if(typeof SyncEngine==='undefined'||!SyncEngine.isReady()){box.innerHTML='<span style="color:var(--red)">ยังไม่ได้เชื่อมต่อ Supabase (ออฟไลน์ หรือโหลดไลบรารีไม่สำเร็จ) — รีโหลดหน้าแล้วลองใหม่</span>';return;}
+  btn.disabled=true; box.textContent='กำลังตรวจเทียบกับคลาวด์…';
+  try{
+    const r=await SyncEngine.compare(); _cloudReport=r;
+    const missN=r.tables.reduce((n,t)=>n+t.missing.length,0)+r.settings.filter(s=>s.status==='missing').length;
+    const diffN=r.tables.reduce((n,t)=>n+t.diff.length,0)+r.settings.filter(s=>s.status==='diff').length;
+    let h='';
+    if(r.errors.length) h+='<div style="color:var(--red);margin-bottom:8px;">⚠️ อ่านบางตารางไม่สำเร็จ: '+r.errors.map(e=>_cloudEsc(e.name)+' ('+_cloudEsc(e.message)+')').join(', ')+'</div>';
+    if(r.queued) h+='<div style="color:var(--muted);margin-bottom:8px;">มีงานค้างในคิวส่งขึ้นคลาวด์ '+r.queued+' รายการ</div>';
+    const lines=[];
+    r.tables.forEach(t=>{ if(t.missing.length||t.diff.length) lines.push('• '+(CLOUD_LABELS[t.key]||t.key)+': ไม่มีบนคลาวด์ <b>'+t.missing.length+'</b> · ต่างจากคลาวด์ <b>'+t.diff.length+'</b> (ในเครื่อง '+t.localCount+' / คลาวด์ '+t.remoteCount+')'); });
+    r.settings.forEach(s=>lines.push('• ตั้งค่า '+(CLOUD_LABELS[s.key]||s.key)+': '+(s.status==='missing'?'ยังไม่มีบนคลาวด์':'ต่างจากคลาวด์')));
+    if(!missN&&!diffN){
+      h+='<div style="color:var(--green,#27ae60)">✅ ข้อมูลในเครื่องตรงกับคลาวด์ครบ ไม่มีอะไรต้องอัปเดต</div>';
+      box.innerHTML=h; return;
+    }
+    h+='<div style="margin-bottom:10px;line-height:1.7;">'+lines.join('<br>')+'</div>';
+    h+='<div style="font-size:0.75rem;color:var(--muted);margin-bottom:8px;">“ไม่มีบนคลาวด์” = ตกหล่น จะเพิ่มขึ้นไปให้ · “ต่างจากคลาวด์” = มีทั้งสองที่แต่ค่าไม่เท่ากัน ถ้าเลือกอัปเดตจะใช้ค่าในเครื่องนี้เขียนทับ (ควรทำเมื่อเครื่องนี้คือเครื่องที่ข้อมูลถูกต้อง)</div>';
+    h+='<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+    if(missN) h+='<button class="btn btn-primary" onclick="cloudSyncApply(false)">⬆️ เพิ่มเฉพาะที่ตกหล่น ('+missN+')</button>';
+    if(diffN) h+='<button class="btn btn-ghost" onclick="cloudSyncApply(true)">⬆️ เพิ่มที่ตกหล่น + เขียนทับที่ต่าง ('+(missN+diffN)+')</button>';
+    h+='</div>';
+    box.innerHTML=h;
+  }catch(e){
+    box.innerHTML='<span style="color:var(--red)">ตรวจเทียบไม่สำเร็จ: '+_cloudEsc(e.message||e)+'</span>';
+  }finally{btn.disabled=false;}
+}
+async function cloudSyncApply(includeDiff){
+  if(!_cloudReport) return;
+  const box=document.getElementById('cloudSyncResult');
+  if(includeDiff&&!confirm('ใช้ข้อมูลในเครื่องนี้เขียนทับรายการที่ต่างจากคลาวด์ ใช่ไหม?\n(ถ้าเครื่องอื่นแก้ข้อมูลล่าสุดไว้ ค่านั้นอาจถูกทับ)'))return;
+  box.textContent='กำลังอัปเดตขึ้นคลาวด์…';
+  try{
+    const res=await SyncEngine.apply(_cloudReport,includeDiff); _cloudReport=null;
+    if(res.errors.length){
+      box.innerHTML='<div style="color:var(--red)">⚠️ ส่งสำเร็จ '+res.pushed+' รายการ แต่บางส่วนล้มเหลว:<br>'+res.errors.map(e=>'• '+_cloudEsc(e.name)+': '+_cloudEsc(e.message)).join('<br>')+'<br><span style="color:var(--muted)">ถ้าข้อความบอกว่าไม่พบ column/ตาราง ให้รันไฟล์ supabase-schema-phase*.sql ที่ยังไม่ได้รันใน SQL Editor แล้วลองใหม่</span></div>';
+      showToast('อัปเดตขึ้นคลาวด์ไม่สมบูรณ์','error');
+    }else{
+      box.innerHTML='<div style="color:var(--green,#27ae60)">✅ อัปเดตขึ้น Supabase สำเร็จ '+res.pushed+' รายการ ('+new Date().toLocaleTimeString('th-TH')+')</div>';
+      showToast('อัปเดตข้อมูลขึ้นคลาวด์สำเร็จ '+res.pushed+' รายการ','success');
+    }
+  }catch(e){
+    box.innerHTML='<span style="color:var(--red)">อัปเดตไม่สำเร็จ: '+_cloudEsc(e.message||e)+'</span>';
+  }
+}
