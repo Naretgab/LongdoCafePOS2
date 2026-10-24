@@ -2414,11 +2414,24 @@ function deleteExpCat(name){
   showToast('ลบหมวดหมู่แล้ว','success');
 }
 
+function renderCommissionExpenses(period,refKey){
+  const tbody=document.getElementById('commissionTable'); if(!tbody) return;
+  let rows=getAllExpenses().filter(e=>e.automatic).reverse();
+  if(refKey) rows=rows.filter(e=>dateMatchesPeriod(e.date,period,refKey));
+  rows=applySortOption(rows,document.getElementById('expSort')?.value||'date_desc','name','date');
+  const total=money2(rows.reduce((s,e)=>s+e.amount,0));
+  const totalEl=document.getElementById('commissionPeriodTotal');
+  if(totalEl) totalEl.textContent=`รวม ฿${total.toLocaleString()} (${rows.length} รายการ)`;
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted);">ไม่มีค่าคอมมิชชั่น</td></tr>';return;}
+  tbody.innerHTML=rows.map(e=>`<tr><td>${e.date}</td><td style="font-weight:600;">${e.name}</td><td>${e.note||'—'}</td><td style="font-weight:600;color:var(--red);">฿${e.amount.toLocaleString()}</td></tr>`).join('');
+}
+
 function renderExpTable(){
   const period = reportPeriod.expenses||'all';
   const refKey = syncExpPickers(period);
   renderAdExpenses(period,refKey);
-  const allExps = getAllExpenses().slice().reverse();
+  renderCommissionExpenses(period,refKey);
+  const allExps = getAllExpenses().filter(e=>!e.automatic).reverse(); // ค่าคอมมิชชั่นแสดงในตารางแยกต่างหาก
   let exps = refKey ? allExps.filter(e=>dateMatchesPeriod(e.date, period, refKey)) : allExps;
   exps = applySortOption(exps, document.getElementById('expSort')?.value||'date_desc', 'name', 'date');
   const tbody=document.getElementById('expTable');
