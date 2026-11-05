@@ -4469,7 +4469,7 @@ async function cloudPull(fromSettings){
     let msg=r.errors.length?('ดึงไม่ครบ: '+r.errors.map(e=>e.name+' ('+e.message+')').join(', ')):('✅ ดึงข้อมูลล่าสุดแล้ว — มีรายการใหม่/เปลี่ยน '+changedN+' รายการ'+(ordersT?(' (ออเดอร์บนคลาวด์ '+ordersT.remoteCount+')'):''));
     if(r.localOnly) msg+=' · มี '+r.localOnly+' รายการที่อยู่เฉพาะในเครื่องนี้ ยังไม่ขึ้นคลาวด์ (ไปที่ ตั้งค่าระบบ > อัปเดตข้อมูลขึ้น Supabase)';
     if(box) box.textContent=msg;
-    showToast(r.errors.length?'ดึงข้อมูลไม่สมบูรณ์':'ดึงข้อมูลล่าสุดสำเร็จ',r.errors.length?'error':'success');
+    showToast(r.errors.length?('ดึงข้อมูลไม่ครบ: '+r.errors.map(e=>e.name+' — '+e.message).join(' | ')):'ดึงข้อมูลล่าสุดสำเร็จ',r.errors.length?'error':'success');
   }catch(e){
     if(box) box.textContent='ดึงข้อมูลไม่สำเร็จ: '+(e.message||e);
     showToast('ดึงข้อมูลไม่สำเร็จ: '+(e.message||e),'error');

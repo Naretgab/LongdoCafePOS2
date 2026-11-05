@@ -360,12 +360,19 @@ const SyncEngine = (() => {
             if (!l) changed++; else if (JSON.stringify(normV(l)) !== JSON.stringify(normV(r))) changed++;
           }
           const merged = [...remoteRecs, ...localOnly].sort((a, b) => a.id - b.id);
-          localStorage.setItem('ld_' + key, JSON.stringify(merged));
-          localStorage.setItem(SNAP_PREFIX + key, JSON.stringify(merged));
+          try {
+            const json = JSON.stringify(merged);
+            localStorage.setItem('ld_' + key, json);
+            try { localStorage.setItem(SNAP_PREFIX + key, json); }
+            catch (qe) { localStorage.removeItem(SNAP_PREFIX + key); } // snapshot เป็นแค่ตัวช่วย diff — ถ้าพื้นที่เต็มให้ข้าม ข้อมูลจริงสำคัญกว่า
+          } catch (qe) {
+            throw new Error('บันทึกลงเครื่องไม่สำเร็จ (พื้นที่จัดเก็บเต็ม?) ' + (qe.message || qe));
+          }
           result.tables.push({ key, changed, remoteCount: remoteRecs.length });
           result.localOnly += localOnly.length;
         } catch (e) {
-          result.errors.push({ name: SYNC_TABLES[key], message: e.message || String(e) });
+          console.error('[pull] failed for', SYNC_TABLES[key], e);
+          result.errors.push({ name: SYNC_TABLES[key], message: (e && (e.message || e.details || e.hint)) || JSON.stringify(e) || String(e) });
         }
       }
       try {
