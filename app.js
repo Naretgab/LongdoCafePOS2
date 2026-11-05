@@ -4451,3 +4451,30 @@ async function cloudSyncApply(includeDiff){
     box.innerHTML='<span style="color:var(--red)">อัปเดตไม่สำเร็จ: '+_cloudEsc(e.message||e)+'</span>';
   }
 }
+
+
+// ── ⬇️ ปุ่มดึงข้อมูลล่าสุดจาก Supabase ──
+let _cloudPullBusy=false;
+async function cloudPull(fromSettings){
+  if(_cloudPullBusy) return;
+  const box=document.getElementById('cloudPullResult');
+  if(typeof SyncEngine==='undefined'||!SyncEngine.isReady()){const m='ยังไม่ได้เชื่อมต่อ Supabase (ออฟไลน์ หรือโหลดไลบรารีไม่สำเร็จ) — รีโหลดหน้าแล้วลองใหม่';showToast(m,'error');if(box)box.textContent=m;return;}
+  _cloudPullBusy=true;
+  document.querySelectorAll('.btn-cloud-pull').forEach(b=>b.disabled=true);
+  showToast('กำลังดึงข้อมูลล่าสุดจาก Supabase…');
+  try{
+    const r=await SyncEngine.pullAll();
+    const ordersT=r.tables.find(t=>t.key==='orders');
+    const changedN=r.tables.reduce((n,t)=>n+t.changed,0);
+    let msg=r.errors.length?('ดึงไม่ครบ: '+r.errors.map(e=>e.name+' ('+e.message+')').join(', ')):('✅ ดึงข้อมูลล่าสุดแล้ว — มีรายการใหม่/เปลี่ยน '+changedN+' รายการ'+(ordersT?(' (ออเดอร์บนคลาวด์ '+ordersT.remoteCount+')'):''));
+    if(r.localOnly) msg+=' · มี '+r.localOnly+' รายการที่อยู่เฉพาะในเครื่องนี้ ยังไม่ขึ้นคลาวด์ (ไปที่ ตั้งค่าระบบ > อัปเดตข้อมูลขึ้น Supabase)';
+    if(box) box.textContent=msg;
+    showToast(r.errors.length?'ดึงข้อมูลไม่สมบูรณ์':'ดึงข้อมูลล่าสุดสำเร็จ',r.errors.length?'error':'success');
+  }catch(e){
+    if(box) box.textContent='ดึงข้อมูลไม่สำเร็จ: '+(e.message||e);
+    showToast('ดึงข้อมูลไม่สำเร็จ: '+(e.message||e),'error');
+  }finally{
+    _cloudPullBusy=false;
+    document.querySelectorAll('.btn-cloud-pull').forEach(b=>b.disabled=false);
+  }
+}

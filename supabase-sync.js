@@ -149,6 +149,8 @@ const SyncEngine = (() => {
   let ready = false;
   let flushing = false;
   let statusEl = null;
+  let rtChannel = null;
+  let pulling = false;
 
   function configured() {
     return SUPABASE_CONFIG.url.startsWith('http') &&
@@ -332,6 +334,64 @@ const SyncEngine = (() => {
     return result;
   }
 
+
+  // ── ปุ่ม "ดึงข้อมูลล่าสุดจาก Supabase" (manual pull) ──────────────
+  // ดึงทุกตารางจากคลาวด์มาทับ/เพิ่มในเครื่องนี้ (คลาวด์ชนะเมื่อ id ซ้ำ)
+  // รายการที่มีเฉพาะในเครื่อง (ยังไม่ขึ้นคลาวด์) ไม่ถูกลบ — แจ้งจำนวนให้ไปกดปุ่มอัปเดตขึ้นคลาวด์
+  async function pullAll() {
+    if (!ready) throw new Error('ยังไม่ได้เชื่อมต่อ Supabase (หรือโหลด supabase-js ไม่สำเร็จ)');
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('ขณะนี้ออฟไลน์ — ต่ออินเทอร์เน็ตก่อน');
+    if (pulling) throw new Error('กำลังดึงข้อมูลอยู่');
+    pulling = true;
+    setStatus('syncing');
+    const result = { tables: [], localOnly: 0, errors: [] };
+    try {
+      for (const key of Object.keys(SYNC_TABLES)) {
+        try {
+          const rows = await fetchAll(SYNC_TABLES[key]);
+          const remoteRecs = rows.map(fromRow[key]);
+          const local = DB.get(key);
+          const localMap = new Map(local.map(r => [String(r.id), r]));
+          const remoteIds = new Set(remoteRecs.map(r => String(r.id)));
+          const localOnly = local.filter(r => !remoteIds.has(String(r.id)));
+          let changed = 0;
+          for (const r of remoteRecs) {
+            const l = localMap.get(String(r.id));
+            if (!l) changed++; else if (JSON.stringify(normV(l)) !== JSON.stringify(normV(r))) changed++;
+          }
+          const merged = [...remoteRecs, ...localOnly].sort((a, b) => a.id - b.id);
+          localStorage.setItem('ld_' + key, JSON.stringify(merged));
+          localStorage.setItem(SNAP_PREFIX + key, JSON.stringify(merged));
+          result.tables.push({ key, changed, remoteCount: remoteRecs.length });
+          result.localOnly += localOnly.length;
+        } catch (e) {
+          result.errors.push({ name: SYNC_TABLES[key], message: e.message || String(e) });
+        }
+      }
+      try {
+        const { data: srows, error } = await client.from('settings').select('*');
+        if (error) throw error;
+        for (const r of srows || []) {
+          if (!SETTINGS_KEYS.includes(r.key)) continue;
+          if (r.key === 'orderSeq') { const cur = Number(DB.get('orderSeq', 0)) || 0; if (Number(r.value) > cur) localStorage.setItem('ld_orderSeq', JSON.stringify(r.value)); continue; }
+          localStorage.setItem('ld_' + r.key, JSON.stringify(r.value));
+        }
+      } catch (e) {
+        result.errors.push({ name: 'settings', message: e.message || String(e) });
+      }
+      try {
+        const maxOrderId = DB.get('orders').reduce((m, o) => Math.max(m, o.id || 0), 0);
+        if (maxOrderId >= DB.get('orderSeq', 1000001)) localStorage.setItem('ld_orderSeq', JSON.stringify(maxOrderId + 1));
+      } catch {}
+      subscribeRealtime(); // ต่อ Realtime ใหม่ เผื่อการเชื่อมต่อเดิมหลุด
+      refreshUiIfSafe();
+      setStatus(result.errors.length ? 'error' : 'synced');
+    } finally {
+      pulling = false;
+    }
+    return result;
+  }
+
   // ── called from DB.set() ──────────────────────────────────────
   function onSet(key, value) {
     if (!ready) return; // local-only mode: nothing to do
@@ -432,12 +492,14 @@ const SyncEngine = (() => {
   // ── realtime: pick up changes made from other devices ────────
   function subscribeRealtime() {
     if (!ready) return;
+    if (rtChannel) { try { client.removeChannel(rtChannel); } catch {} rtChannel = null; }
     let channel = client.channel('ld_sync');
     for (const key of Object.keys(SYNC_TABLES)) {
       channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: SYNC_TABLES[key] }, handleRemoteChange(key));
     }
     channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, handleRemoteSettingChange);
     channel.subscribe();
+    rtChannel = channel;
   }
   function handleRemoteChange(key) {
     return (payload) => {
@@ -480,5 +542,5 @@ const SyncEngine = (() => {
     bootstrap();
   }
 
-  return { init, onSet, compare, apply, isReady };
+  return { init, onSet, compare, apply, pullAll, isReady };
 })();
