@@ -4478,3 +4478,53 @@ async function cloudPull(fromSettings){
     document.querySelectorAll('.btn-cloud-pull').forEach(b=>b.disabled=false);
   }
 }
+
+
+// ── 📄 ส่งออกข้อมูลการขายเป็น CSV (ข้อมูลดิบ สำหรับวิเคราะห์ต่อ) ──
+// ตัดออเดอร์ที่ยกเลิกออก ใช้ช่วงวันที่เดียวกับหน้ารายงานยอดขาย
+// สร้าง 2 ไฟล์: ออเดอร์ (1 แถว/ออเดอร์) และ รายการสินค้า (1 แถว/สินค้า) เชื่อมกันด้วย order_id
+function csvCell(v){
+  if(v===null||v===undefined) return '';
+  if(typeof v==='number') return Number.isFinite(v)?String(v):'';
+  if(typeof v==='boolean') return v?'1':'0';
+  let t=String(v).replace(/\r?\n/g,' ');
+  if(/^[=+\-@\t]/.test(t)) t="'"+t; // กัน Excel ตีความเป็นสูตร
+  return /[",]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;
+}
+function csvBuild(headers,rows){return '﻿'+[headers.join(',')].concat(rows.map(r=>r.map(csvCell).join(','))).join('\r\n');}
+function csvDownload(name,text){
+  const url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+function exportSalesCsv(){
+  try{
+    const period=reportPeriod.sales||'day',key=syncSalesPickers(period),bounds=employeePeriodBounds(period,key);
+    const orders=getFilteredOrders(period,key).slice().sort((a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||''))||a.id-b.id);
+    if(!orders.length){showToast('ไม่มีออเดอร์ในช่วงที่เลือก','error');return;}
+    const gp=DB.get('gpSettings',{instore:0,grab:32.1,lineman:32.1});
+    const types=new Map(DB.get('customerTypes').map(t=>[String(t.id),t.name]));
+    const customers=new Map(DB.get('customers').map(c=>[String(c.id),c]));
+    const cats=new Map(DB.get('categories').map(c=>[String(c.id),c.name]));
+    const menus=new Map(DB.get('menus').map(m=>[String(m.id),m]));
+    const promos=new Map(DB.get('promotions').map(p=>[String(p.id),p.name]));
+    const chName=t=>t==='grab'?'Grab':t==='lineman'?'LINE MAN':'หน้าร้าน';
+    const oHead=['order_id','order_no','date','time','channel','platform_ref_no','customer_id','customer_name','customer_type','salesperson','is_advertisement','item_qty_total','subtotal_before_discount','discount','total_after_discount','gp_amount','ad_cost_allocated','net_after_gp_and_ads','commission','cost','profit_recorded','pay_method','promotions'];
+    const iHead=['order_id','order_no','date','time','channel','item_id','item_name','category','qty','unit_price','line_total','unit_cost','line_cost','item_discount','item_discount_type','addons','note'];
+    const oRows=[],iRows=[];
+    orders.forEach(o=>{
+      const ch=chName(o.type||'instore'),gpAmt=money2(Number(o.gpAmount??(o.gpPct!=null?money2(o.total*o.gpPct/100):getOrderGpAmount(o,gp)))||0),ad=money2(getOrderAdCost(o));
+      const cust=o.customer?customers.get(String(o.customer.id)):null;
+      const qty=(o.items||[]).reduce((n,i)=>n+(Number(i.qty)||0),0);
+      oRows.push([o.id,o.orderNo,o.date,o.time||'',ch,o.refNo||'',o.customer?.id??'',o.customer?.name||'',cust?(types.get(String(cust.type))||''):'',o.salesperson?.name||'',!!o.isAdvertisement,qty,money2(o.subtotal),money2(o.discount||0),money2(o.total),gpAmt,ad,money2(Number(o.total)-gpAmt-ad),orderCommission(o),money2(o.cost||0),money2(o.profit||0),o.payMethod||'',(o.promoIds||[]).map(id=>promos.get(String(id))||id).join(' | ')]);
+      (o.items||[]).forEach(i=>{
+        const m=menus.get(String(i.id)),q=Number(i.qty)||0,uc=Number(m?m.cost:i.cost)||0;
+        iRows.push([o.id,o.orderNo,o.date,o.time||'',ch,i.id??'',i.name||'',m?(cats.get(String(m.cat))||''):'',q,Number(i.price)||0,Number(i.total)||0,uc,money2(uc*q),Number(i.itemDiscount)||0,i.itemDiscountType||'',(i.addons||[]).map(a=>a.name+(a.price?'(+'+a.price+')':'')).join(' | '),i.note||'']);
+      });
+    });
+    const tag=bounds[0]===bounds[1]?bounds[0]:bounds[0]+'_to_'+bounds[1];
+    csvDownload(`longdo-sales-orders-${tag}.csv`,csvBuild(oHead,oRows));
+    setTimeout(()=>csvDownload(`longdo-sales-items-${tag}.csv`,csvBuild(iHead,iRows)),400);
+    showToast(`ส่งออก ${oRows.length} ออเดอร์ / ${iRows.length} รายการสินค้า (ไม่รวมที่ยกเลิก)`,'success');
+  }catch(e){console.error(e);showToast('ส่งออก CSV ไม่สำเร็จ: '+(e.message||e),'error');}
+}
