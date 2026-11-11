@@ -151,6 +151,12 @@ const SyncEngine = (() => {
   let statusEl = null;
   let rtChannel = null;
   let pulling = false;
+  let catching = false;
+  let lastCatchup = 0;
+  let rtRetryTimer = null, rtRetryDelay = 3000;
+  const LASTPULL_KEY = 'ld_syncLastPull';
+  let lastPullAt = Number(localStorage.getItem(LASTPULL_KEY)) || 0;
+  function markPulled(ts) { lastPullAt = ts; try { localStorage.setItem(LASTPULL_KEY, String(ts)); } catch {} }
 
   function configured() {
     return SUPABASE_CONFIG.url.startsWith('http') &&
@@ -344,6 +350,7 @@ const SyncEngine = (() => {
     if (pulling) throw new Error('กำลังดึงข้อมูลอยู่');
     pulling = true;
     setStatus('syncing');
+    const pullStartedAt = Date.now();
     const result = { tables: [], localOnly: 0, errors: [] };
     try {
       for (const key of Object.keys(SYNC_TABLES)) {
@@ -390,6 +397,7 @@ const SyncEngine = (() => {
         const maxOrderId = DB.get('orders').reduce((m, o) => Math.max(m, o.id || 0), 0);
         if (maxOrderId >= DB.get('orderSeq', 1000001)) localStorage.setItem('ld_orderSeq', JSON.stringify(maxOrderId + 1));
       } catch {}
+      markPulled(pullStartedAt);
       subscribeRealtime(); // ต่อ Realtime ใหม่ เผื่อการเชื่อมต่อเดิมหลุด
       refreshUiIfSafe();
       setStatus(result.errors.length ? 'error' : 'synced');
@@ -436,6 +444,7 @@ const SyncEngine = (() => {
   async function bootstrap() {
     if (!ready) return;
     setStatus('syncing');
+    const bootStartedAt = Date.now();
 
     for (const key of Object.keys(SYNC_TABLES)) {
       const table = SYNC_TABLES[key];
@@ -493,20 +502,95 @@ const SyncEngine = (() => {
     } catch (e) { console.error('[sync] orderSeq reconcile failed', e); }
 
     setStatus('synced');
+    markPulled(bootStartedAt);
     subscribeRealtime();
   }
 
   // ── realtime: pick up changes made from other devices ────────
   function subscribeRealtime() {
     if (!ready) return;
-    if (rtChannel) { try { client.removeChannel(rtChannel); } catch {} rtChannel = null; }
+    if (rtRetryTimer) { clearTimeout(rtRetryTimer); rtRetryTimer = null; }
+    if (rtChannel) { const old = rtChannel; rtChannel = null; try { client.removeChannel(old); } catch {} }
     let channel = client.channel('ld_sync');
     for (const key of Object.keys(SYNC_TABLES)) {
       channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: SYNC_TABLES[key] }, handleRemoteChange(key));
     }
     channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, handleRemoteSettingChange);
-    channel.subscribe();
     rtChannel = channel;
+    channel.subscribe((status, err) => {
+      if (channel !== rtChannel) return; // ช่องเก่าที่เราปิดเอง — ไม่ต้องทำอะไร
+      if (status === 'SUBSCRIBED') {
+        rtRetryDelay = 3000;
+        setStatus('synced');
+        catchUp('subscribed', true); // ดึงสิ่งที่พลาดไประหว่างที่หลุด
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn('[sync] realtime', status, err || '');
+        setStatus('error');
+        if (!rtRetryTimer) {
+          rtRetryTimer = setTimeout(() => { rtRetryTimer = null; subscribeRealtime(); }, rtRetryDelay);
+          rtRetryDelay = Math.min(rtRetryDelay * 2, 60000);
+        }
+      }
+    });
+  }
+
+  // ── รวมแถวจากคลาวด์เข้าเครื่อง (ใช้โดย catch-up) — คืน true ถ้ามีอะไรเปลี่ยน ──
+  function mergeRemoteRecs(key, remoteRecs) {
+    const local = DB.get(key);
+    const map = new Map(local.map(r => [String(r.id), r]));
+    let changed = false;
+    for (const rec of remoteRecs) {
+      const old = map.get(String(rec.id));
+      if (!old || JSON.stringify(normV(old)) !== JSON.stringify(normV(rec))) { map.set(String(rec.id), rec); changed = true; }
+    }
+    if (!changed) return false;
+    const merged = [...map.values()].sort((a, b) => a.id - b.id);
+    const json = JSON.stringify(merged);
+    localStorage.setItem('ld_' + key, json); // ถ้าพื้นที่เต็มจะ throw ให้ผู้เรียกจับ
+    try { localStorage.setItem(SNAP_PREFIX + key, json); } catch { try { localStorage.removeItem(SNAP_PREFIX + key); } catch {} }
+    return true;
+  }
+
+  // ── catch-up เงียบๆ: ดึงเฉพาะแถวที่ updated_at ใหม่กว่าครั้งก่อน (เผื่อ realtime พลาด/เครื่องหลับ) ──
+  async function catchUp(reason, force) {
+    if (!ready || pulling || catching || !lastPullAt) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    const now = Date.now();
+    if (!force && now - lastCatchup < 10000) return;
+    if (loadQueue().length) { flushQueue(); return; } // มีของค้างส่งขึ้น — ส่งก่อน กันของเก่าทับของใหม่
+    catching = true; lastCatchup = now;
+    let changedAny = false;
+    try {
+      const since = new Date(lastPullAt - 15 * 60 * 1000).toISOString(); // เผื่อนาฬิกาแต่ละเครื่องไม่ตรงกัน
+      for (const key of Object.keys(SYNC_TABLES)) {
+        let from = 0, all = [];
+        for (;;) {
+          const { data, error } = await client.from(SYNC_TABLES[key]).select('*').gt('updated_at', since).order('id', { ascending: true }).range(from, from + 999);
+          if (error) throw error;
+          all = all.concat(data || []);
+          if (!data || data.length < 1000) break;
+          from += 1000;
+        }
+        if (all.length && mergeRemoteRecs(key, all.map(fromRow[key]))) changedAny = true;
+      }
+      const { data: srows, error: serr } = await client.from('settings').select('*').gt('updated_at', since);
+      if (serr) throw serr;
+      for (const r of srows || []) {
+        if (!SETTINGS_KEYS.includes(r.key)) continue;
+        if (r.key === 'orderSeq') { if (Number(r.value) > (Number(DB.get('orderSeq', 0)) || 0)) { localStorage.setItem('ld_orderSeq', JSON.stringify(r.value)); } continue; }
+        const cur = localStorage.getItem('ld_' + r.key);
+        const nv = JSON.stringify(r.value);
+        if (cur === null || JSON.stringify(normV(JSON.parse(cur))) !== JSON.stringify(normV(r.value))) { localStorage.setItem('ld_' + r.key, nv); changedAny = true; }
+      }
+      markPulled(now);
+      if (changedAny) refreshUiIfSafe();
+      setStatus('synced');
+    } catch (e) {
+      console.warn('[sync] catch-up failed (' + reason + '):', e.message || e);
+      setStatus('error');
+    } finally {
+      catching = false;
+    }
   }
   function handleRemoteChange(key) {
     return (payload) => {
@@ -519,8 +603,15 @@ const SyncEngine = (() => {
         map.set(rec.id, rec);
       }
       const merged = [...map.values()].sort((a, b) => a.id - b.id);
-      localStorage.setItem('ld_' + key, JSON.stringify(merged));
-      localStorage.setItem(SNAP_PREFIX + key, JSON.stringify(merged));
+      try {
+        const json = JSON.stringify(merged);
+        localStorage.setItem('ld_' + key, json);
+        try { localStorage.setItem(SNAP_PREFIX + key, json); } catch { try { localStorage.removeItem(SNAP_PREFIX + key); } catch {} }
+      } catch (e) {
+        console.error('[sync] realtime: บันทึกลงเครื่องไม่สำเร็จ (พื้นที่เต็ม?)', e);
+        setStatus('error');
+        return;
+      }
       refreshUiIfSafe();
       setStatus('synced');
     };
@@ -544,7 +635,12 @@ const SyncEngine = (() => {
     if (typeof supabase === 'undefined') { console.warn('[sync] supabase-js failed to load — running local-only.'); setStatus('off'); return; }
     client = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
     ready = true;
-    window.addEventListener('online', flushQueue);
+    window.addEventListener('online', () => { flushQueue(); subscribeRealtime(); catchUp('online', true); });
+    // กลับมาเปิดแอป/สลับแท็บ/เครื่องตื่น → ดึงของที่พลาดทันที
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') catchUp('visible'); });
+    window.addEventListener('focus', () => catchUp('focus'));
+    // กันตก: ระหว่างเปิดแอปอยู่ เช็คของใหม่ทุก 60 วินาที (เบามาก — ดึงเฉพาะแถวที่เพิ่งเปลี่ยน)
+    setInterval(() => { if (document.visibilityState === 'visible') catchUp('interval'); }, 60000);
     flushQueue();
     bootstrap();
   }
