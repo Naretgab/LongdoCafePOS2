@@ -1286,7 +1286,15 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
               </select>
             </div>
           </div>
-          <div style="font-size:0.75rem;color:var(--muted);margin-top:8px;">กดวันเพื่อเปิด/ปิด เลือกได้หลายวัน (เช่น เฉพาะ ส–อา หรือเฉพาะวันอังคาร) เมื่อเลือกทุกวันจะรวมทุกวัน จ–อา</div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+            <div style="font-weight:600;">ประเภทลูกค้า:</div>
+            <div id="hoursTypeChips" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+            <div style="font-weight:600;">ดูเป็น:</div>
+            <div id="hoursMetricBtns" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+          </div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:8px;">กดวันหรือประเภทลูกค้าเพื่อเปิด/ปิด เลือกได้หลายอย่าง (เช่น เฉพาะ ส–อา หรือเฉพาะวันอังคาร) เมื่อเลือกทุกวันจะรวมทุกวัน จ–อา</div>
         </div>
         <div id="hoursReportBody"></div>
       </div>
@@ -2150,7 +2158,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.min.js"></script>
 <div class="modal-overlay" id="employeeSlipModal"><div class="modal"><div class="modal-header"><h3>สลิปจ่ายค่าคอมมิชชั่นพนักงาน</h3><button class="btn btn-ghost" onclick="closeModal('employeeSlipModal')">✕</button></div><p id="employeeSlipSummary"></p><label>วันที่จ่าย<input class="form-control" type="date" id="employeeSlipDate"></label><label>วิธีจ่าย<select class="form-control" id="employeeSlipMethod"><option>โอนเงิน</option><option>เงินสด</option><option>อื่น ๆ</option></select></label><label>ชื่อผู้จ่าย<select class="form-control" id="employeeSlipPayer" aria-label="ชื่อผู้จ่าย"></select></label><label>หมายเหตุ<input class="form-control" id="employeeSlipNote"></label><p>ยอดจ่ายในสลิปเป็นค่าคอมมิชชั่นจากออเดอร์ที่เลือก การสร้างสลิปไม่บันทึกรายจ่ายซ้ำหรือสถานะการชำระเงิน</p><button class="btn btn-primary" onclick="printEmployeeSlip()">🖨️ พิมพ์ / บันทึก PDF</button></div></div>
 <div class="modal-overlay" id="lineReportModal"><div class="modal"><div class="modal-header"><h3>ส่งสรุปยอดขายเข้า LINE กลุ่ม</h3><button class="btn btn-ghost" onclick="closeModal('lineReportModal')">✕</button></div><p id="lineReportGroup" style="font-weight:bold;"></p><pre id="lineReportText" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto;font-family:inherit;"></pre><p id="lineReportStatus" role="status"></p><button class="btn btn-primary" id="lineReportSend" disabled onclick="sendLineSalesSummary()">ยืนยันส่งเข้ากลุ่ม LINE</button></div></div>
-<script src="supabase-sync.js?v=51"></script>
-<script src="app.js?v=51"></script>
+<script src="supabase-sync.js?v=52"></script>
+<script src="app.js?v=52"></script>
 </body>
 </html>

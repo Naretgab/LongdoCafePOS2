@@ -4578,6 +4578,11 @@ function hoursParseTime(t){
 function hoursDow(dateStr){const p=String(dateStr||'').split('-');if(p.length<3)return null;const d=new Date(+p[0],+p[1]-1,+p[2]);return isNaN(d)?null:d.getDay();}
 function hoursToggleDow(d){if(hoursSelectedDow.has(d)){if(hoursSelectedDow.size>1)hoursSelectedDow.delete(d);}else hoursSelectedDow.add(d);renderHoursReport();}
 function hoursPresetDow(list){hoursSelectedDow=new Set(list);renderHoursReport();}
+let hoursMetric='sales';            // 'sales' | 'orders'
+let hoursExcludedTypes=new Set();   // ประเภทลูกค้าที่ปิดไว้ (ว่าง = เลือกทุกประเภท)
+function hoursSetMetric(m){hoursMetric=m;renderHoursReport();}
+function hoursToggleType(k,allKeys){if(hoursExcludedTypes.has(k))hoursExcludedTypes.delete(k);else if(allKeys.filter(x=>!hoursExcludedTypes.has(x)).length>1)hoursExcludedTypes.add(k);renderHoursReport();}
+function hoursAllTypes(){hoursExcludedTypes=new Set();renderHoursReport();}
 function hoursPad(n){return String(n).padStart(2,'0');}
 function hoursLabel(startMin,size){const e=startMin+size;return hoursPad(Math.floor(startMin/60))+':'+hoursPad(startMin%60)+'–'+hoursPad(Math.floor((e%1440)/60))+':'+hoursPad(e%60);}
 function resetHoursPickerToNow(){resetPeriodPickerToNow('hours',reportPeriod.hours||'month',renderHoursReport);}
@@ -4586,66 +4591,98 @@ function renderHoursReport(){
   const period=reportPeriod.hours||'month',key=syncPeriodPickers('hours',period,true);
   const size=+(document.getElementById('hoursBucketSize')?.value||60);
   const gp=DB.get('gpSettings',{instore:0,grab:32.1,lineman:32.1});
-  // ปุ่มเลือกวัน
-  const chipHtml=HOURS_DOW_ORDER.map(d=>`<button type="button" class="btn btn-sm ${hoursSelectedDow.has(d)?'btn-primary':'btn-ghost'}" style="min-width:44px;" onclick="hoursToggleDow(${d})">${HOURS_DOW_NAMES[d]}</button>`).join('');
-  document.getElementById('hoursDowChips').innerHTML=chipHtml;
+  const byOrders=hoursMetric==='orders';
+  // ── ประเภทลูกค้า ──
+  const typeList=DB.get('customerTypes').map(t=>({key:String(t.id),name:t.name}));
+  typeList.push({key:'none',name:'ไม่ระบุลูกค้า'});
+  const typeKeys=typeList.map(t=>t.key), typeName=new Map(typeList.map(t=>[t.key,t.name]));
+  const custType=new Map(DB.get('customers').map(c=>[String(c.id),c.type!=null?String(c.type):'none']));
+  const orderType=o=>{if(!o.customer||o.customer.id==null)return 'none';const t=custType.get(String(o.customer.id));return (t&&typeName.has(t))?t:'none';};
+  // ── ปุ่มเลือก ──
+  document.getElementById('hoursDowChips').innerHTML=HOURS_DOW_ORDER.map(d=>`<button type="button" class="btn btn-sm ${hoursSelectedDow.has(d)?'btn-primary':'btn-ghost'}" style="min-width:44px;" onclick="hoursToggleDow(${d})">${HOURS_DOW_NAMES[d]}</button>`).join('');
+  const keysJson=JSON.stringify(typeKeys).replace(/"/g,'&quot;');
+  document.getElementById('hoursTypeChips').innerHTML=typeList.map(t=>`<button type="button" class="btn btn-sm ${hoursExcludedTypes.has(t.key)?'btn-ghost':'btn-primary'}" onclick="hoursToggleType('${t.key}',${keysJson})">${_cloudEsc(t.name)}</button>`).join('')+'<button type="button" class="btn btn-ghost btn-sm" onclick="hoursAllTypes()">ทุกประเภท</button>';
+  document.getElementById('hoursMetricBtns').innerHTML=`<button type="button" class="btn btn-sm ${byOrders?'btn-ghost':'btn-primary'}" onclick="hoursSetMetric('sales')">💰 ยอดขาย</button><button type="button" class="btn btn-sm ${byOrders?'btn-primary':'btn-ghost'}" onclick="hoursSetMetric('orders')">🧾 จำนวนออเดอร์</button>`;
+
   const orders=getFilteredOrders(period,key);
   const nBuckets=Math.ceil(1440/size);
   const mk=()=>({orders:0,items:0,sales:0,net:0,days:new Set()});
   const buckets=Array.from({length:nBuckets},mk), noTime=mk();
   const dow=Array.from({length:7},()=>({orders:0,sales:0,days:new Set(),hours:Array.from({length:nBuckets},()=>0)}));
+  const types=new Map(); // key → {orders,sales,hours[]}
+  const metricOf=(o)=>byOrders?1:o.total;
   const activeDays=new Set(); let totalOrders=0,totalSales=0,totalNet=0;
   orders.forEach(o=>{
     const d=hoursDow(o.date); if(d===null||!hoursSelectedDow.has(d)) return;
-    const mins=hoursParseTime(o.time), b=mins===null?noTime:buckets[Math.min(nBuckets-1,Math.floor(mins/size))];
+    const tk=orderType(o); if(hoursExcludedTypes.has(tk)) return;
+    const mins=hoursParseTime(o.time), bi=mins===null?-1:Math.min(nBuckets-1,Math.floor(mins/size)), b=bi<0?noTime:buckets[bi];
     const items=(o.items||[]).reduce((n,i)=>n+(Number(i.qty)||0),0), net=orderAfterGp(o,gp);
     b.orders++; b.items+=items; b.sales+=o.total; b.net+=net; b.days.add(o.date);
     dow[d].orders++; dow[d].sales+=o.total; dow[d].days.add(o.date);
-    if(mins!==null) dow[d].hours[Math.min(nBuckets-1,Math.floor(mins/size))]+=o.total;
+    if(bi>=0) dow[d].hours[bi]+=metricOf(o);
+    if(!types.has(tk)) types.set(tk,{orders:0,sales:0,hours:Array.from({length:nBuckets},()=>0)});
+    const ty=types.get(tk); ty.orders++; ty.sales+=o.total; if(bi>=0) ty.hours[bi]+=metricOf(o);
     activeDays.add(o.date); totalOrders++; totalSales+=o.total; totalNet+=net;
   });
-  if(!totalOrders){root.innerHTML='<div class="card" style="padding:24px;text-align:center;color:var(--muted);">ไม่มีออเดอร์ในช่วงที่เลือก</div>';return;}
-  // ตัดช่วงที่ไม่มีขายหัว-ท้ายวันออก
+  if(!totalOrders){root.innerHTML='<div class="card" style="padding:24px;text-align:center;color:var(--muted);">ไม่มีออเดอร์ในช่วง/เงื่อนไขที่เลือก</div>';return;}
+  const val=b=>byOrders?b.orders:b.sales;
   let first=buckets.findIndex(b=>b.orders), last=buckets.length-1-[...buckets].reverse().findIndex(b=>b.orders);
   if(first<0){first=0;last=-1;}
   const shown=[]; for(let i=first;i<=last;i++) shown.push(i);
-  const maxSales=Math.max(...shown.map(i=>buckets[i].sales),1);
-  const ranked=shown.filter(i=>buckets[i].orders).sort((x,y)=>buckets[y].sales-buckets[x].sales);
+  const maxV=Math.max(...shown.map(i=>val(buckets[i])),1);
+  const ranked=shown.filter(i=>buckets[i].orders).sort((x,y)=>val(buckets[y])-val(buckets[x]));
   const topSet=new Set(ranked.slice(0,3));
-  const bestSales=ranked[0], bestOrders=[...shown].sort((x,y)=>buckets[y].orders-buckets[x].orders)[0];
+  const bestMain=ranked[0], bestOther=[...shown].sort((x,y)=>(byOrders?buckets[y].sales-buckets[x].sales:buckets[y].orders-buckets[x].orders))[0];
   const fmt=n=>'฿'+Math.round(n).toLocaleString();
+  const fmtV=n=>byOrders?Math.round(n).toLocaleString()+' ออเดอร์':fmt(n);
   const label=i=>hoursLabel(i*size,size);
+  const totalV=byOrders?totalOrders:totalSales;
+  const stat=(t,v,s)=>`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">${t}</div><div style="font-size:1.4rem;font-weight:700;">${v}</div><div style="font-size:0.75rem;color:var(--muted);">${s}</div></div>`;
   let h='<div class="grid-4" style="margin-bottom:16px;">'
-   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">ออเดอร์ที่เลือก</div><div style="font-size:1.5rem;font-weight:700;">${totalOrders.toLocaleString()}</div><div style="font-size:0.75rem;color:var(--muted);">${activeDays.size} วันที่มีขาย</div></div>`
-   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">ยอดขายรวม</div><div style="font-size:1.5rem;font-weight:700;">${fmt(totalSales)}</div><div style="font-size:0.75rem;color:var(--muted);">หลังหัก GP ${fmt(totalNet)}</div></div>`
-   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">🔥 ช่วงขายดีสุด (ยอดเงิน)</div><div style="font-size:1.3rem;font-weight:700;">${bestSales!==undefined?label(bestSales):'—'}</div><div style="font-size:0.75rem;color:var(--muted);">${bestSales!==undefined?fmt(buckets[bestSales].sales)+' · '+Math.round(buckets[bestSales].sales/totalSales*100)+'%':''}</div></div>`
-   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">ช่วงที่ออเดอร์เยอะสุด</div><div style="font-size:1.3rem;font-weight:700;">${bestOrders!==undefined?label(bestOrders):'—'}</div><div style="font-size:0.75rem;color:var(--muted);">${bestOrders!==undefined?buckets[bestOrders].orders+' ออเดอร์':''}</div></div>`
+   +stat('ออเดอร์ที่เลือก',totalOrders.toLocaleString(),activeDays.size+' วันที่มีขาย')
+   +stat('ยอดขายรวม',fmt(totalSales),'หลังหัก GP '+fmt(totalNet))
+   +stat('🔥 ช่วงขายดีสุด ('+(byOrders?'จำนวนออเดอร์':'ยอดเงิน')+')',bestMain!==undefined?label(bestMain):'—',bestMain!==undefined?fmtV(val(buckets[bestMain]))+' · '+Math.round(val(buckets[bestMain])/totalV*100)+'%':'')
+   +stat('ช่วงสูงสุดตาม'+(byOrders?'ยอดเงิน':'จำนวนออเดอร์'),bestOther!==undefined?label(bestOther):'—',bestOther!==undefined?(byOrders?fmt(buckets[bestOther].sales):buckets[bestOther].orders+' ออเดอร์'):'')
    +'</div>';
-  // กราฟแท่ง
-  h+='<div class="card" style="margin-bottom:16px;"><div class="card-header"><div class="card-title">กราฟยอดขายตามช่วงเวลา</div><div style="font-size:0.75rem;color:var(--muted);">แท่งสีเข้ม = 3 ช่วงขายดีสุด</div></div>'
-   +'<div style="overflow-x:auto;"><div style="display:flex;align-items:flex-end;gap:4px;height:160px;min-width:'+Math.max(320,shown.length*34)+'px;padding:0 4px;">'
-   +shown.map(i=>{const b=buckets[i],ht=Math.max(b.sales?3:0,Math.round(b.sales/maxSales*140));return `<div title="${label(i)} · ${b.orders} ออเดอร์ · ${fmt(b.sales)}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:26px;"><div style="font-size:0.6rem;color:var(--muted);">${b.sales?Math.round(b.sales).toLocaleString():''}</div><div style="width:100%;height:${ht}px;background:${topSet.has(i)?'var(--caramel,#b5651d)':'#d9c7b0'};border-radius:4px 4px 0 0;"></div></div>`;}).join('')
-   +'</div><div style="display:flex;gap:4px;min-width:'+Math.max(320,shown.length*34)+'px;padding:0 4px;">'
-   +shown.map(i=>`<div style="flex:1;min-width:26px;text-align:center;font-size:0.6rem;color:var(--muted);">${size>=60?hoursPad(Math.floor(i*size/60)):hoursPad(Math.floor(i*size/60))+':'+hoursPad((i*size)%60)}</div>`).join('')
+  const minW=Math.max(320,shown.length*34);
+  h+='<div class="card" style="margin-bottom:16px;"><div class="card-header"><div class="card-title">กราฟ'+(byOrders?'จำนวนออเดอร์':'ยอดขาย')+'ตามช่วงเวลา</div><div style="font-size:0.75rem;color:var(--muted);">แท่งสีเข้ม = 3 ช่วงสูงสุด</div></div>'
+   +'<div style="overflow-x:auto;"><div style="display:flex;align-items:flex-end;gap:4px;height:160px;min-width:'+minW+'px;padding:0 4px;">'
+   +shown.map(i=>{const b=buckets[i],v=val(b),ht=Math.max(v?3:0,Math.round(v/maxV*140));return `<div title="${label(i)} · ${b.orders} ออเดอร์ · ${fmt(b.sales)}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:26px;"><div style="font-size:0.6rem;color:var(--muted);">${v?Math.round(v).toLocaleString():''}</div><div style="width:100%;height:${ht}px;background:${topSet.has(i)?'var(--caramel,#b5651d)':'#d9c7b0'};border-radius:4px 4px 0 0;"></div></div>`;}).join('')
+   +'</div><div style="display:flex;gap:4px;min-width:'+minW+'px;padding:0 4px;">'
+   +shown.map(i=>`<div style="flex:1;min-width:26px;text-align:center;font-size:0.6rem;color:var(--muted);">${hoursPad(Math.floor(i*size/60))}${size<60?':'+hoursPad((i*size)%60):''}</div>`).join('')
    +'</div></div></div>';
-  // ตารางช่วงเวลา
-  h+='<div class="card" style="margin-bottom:16px;"><div class="card-header"><div class="card-title">ตารางสรุปตามช่วงเวลา</div></div><div class="table-wrap"><table><thead><tr><th>ช่วงเวลา</th><th>ออเดอร์</th><th>สินค้า (ชิ้น)</th><th>ยอดขาย</th><th>หลังหัก GP</th><th>เฉลี่ย/ออเดอร์</th><th>เฉลี่ย/วัน</th><th>สัดส่วน</th></tr></thead><tbody>'
+  h+='<div class="card" style="margin-bottom:16px;"><div class="card-header"><div class="card-title">ตารางสรุปตามช่วงเวลา</div></div><div class="table-wrap"><table><thead><tr><th>ช่วงเวลา</th><th>ออเดอร์</th><th>สินค้า (ชิ้น)</th><th>ยอดขาย</th><th>หลังหัก GP</th><th>เฉลี่ย/ออเดอร์</th><th>เฉลี่ย/วัน</th><th>สัดส่วน'+(byOrders?' (ออเดอร์)':' (ยอด)')+'</th></tr></thead><tbody>'
    +shown.map(i=>{const b=buckets[i],rank=ranked.indexOf(i);const medal=rank===0?'🥇 ':rank===1?'🥈 ':rank===2?'🥉 ':'';
-     return `<tr${topSet.has(i)?' style="background:rgba(181,101,29,0.08);"':''}><td style="font-weight:600;">${medal}${label(i)}</td><td>${b.orders}</td><td>${b.items}</td><td style="font-weight:600;">${fmt(b.sales)}</td><td>${fmt(b.net)}</td><td>${b.orders?fmt(b.sales/b.orders):'—'}</td><td>${b.days.size?fmt(b.sales/b.days.size):'—'}</td><td>${Math.round(b.sales/totalSales*1000)/10}%</td></tr>`;}).join('')
-   +(noTime.orders?`<tr><td style="color:var(--muted);">ไม่ระบุเวลา</td><td>${noTime.orders}</td><td>${noTime.items}</td><td>${fmt(noTime.sales)}</td><td>${fmt(noTime.net)}</td><td>${fmt(noTime.sales/noTime.orders)}</td><td>—</td><td>${Math.round(noTime.sales/totalSales*1000)/10}%</td></tr>`:'')
+     return `<tr${topSet.has(i)?' style="background:rgba(181,101,29,0.08);"':''}><td style="font-weight:600;">${medal}${label(i)}</td><td${byOrders?' style="font-weight:600;"':''}>${b.orders}</td><td>${b.items}</td><td${byOrders?'':' style="font-weight:600;"'}>${fmt(b.sales)}</td><td>${fmt(b.net)}</td><td>${b.orders?fmt(b.sales/b.orders):'—'}</td><td>${b.days.size?(byOrders?(Math.round(b.orders/b.days.size*10)/10)+' ออเดอร์':fmt(b.sales/b.days.size)):'—'}</td><td>${Math.round(val(b)/totalV*1000)/10}%</td></tr>`;}).join('')
+   +(noTime.orders?`<tr><td style="color:var(--muted);">ไม่ระบุเวลา</td><td>${noTime.orders}</td><td>${noTime.items}</td><td>${fmt(noTime.sales)}</td><td>${fmt(noTime.net)}</td><td>${fmt(noTime.sales/noTime.orders)}</td><td>—</td><td>${Math.round(val(noTime)/totalV*1000)/10}%</td></tr>`:'')
    +`<tr style="font-weight:700;"><td>รวม</td><td>${totalOrders}</td><td>${buckets.concat([noTime]).reduce((n,b)=>n+b.items,0)}</td><td>${fmt(totalSales)}</td><td>${fmt(totalNet)}</td><td>${fmt(totalSales/totalOrders)}</td><td>—</td><td>100%</td></tr>`
-   +'</tbody></table></div><div style="font-size:0.75rem;color:var(--muted);margin-top:8px;">“เฉลี่ย/วัน” = ยอดขายของช่วงนั้น ÷ จำนวนวันที่ช่วงนั้นมีออเดอร์ · ไม่รวมออเดอร์ที่ยกเลิก</div></div>';
-  // สรุปรายวัน + heatmap
+   +'</tbody></table></div><div style="font-size:0.75rem;color:var(--muted);margin-top:8px;">“เฉลี่ย/วัน” = ค่าของช่วงนั้น ÷ จำนวนวันที่ช่วงนั้นมีออเดอร์ · ไม่รวมออเดอร์ที่ยกเลิก</div></div>';
+  // ── แยกตามประเภทลูกค้า ──
+  const typeRows=typeList.filter(t=>types.has(t.key));
+  if(typeRows.length){
+    h+='<div class="card" style="margin-bottom:16px;"><div class="card-header"><div class="card-title">แยกตามประเภทลูกค้า</div></div><div class="table-wrap"><table><thead><tr><th>ประเภทลูกค้า</th><th>ออเดอร์</th><th>ยอดขาย</th><th>เฉลี่ย/ออเดอร์</th><th>สัดส่วน</th><th>ช่วงขายดีสุด ('+(byOrders?'ออเดอร์':'ยอดเงิน')+')</th></tr></thead><tbody>'
+     +typeRows.map(t=>{const ty=types.get(t.key),best=[...shown].sort((x,y)=>ty.hours[y]-ty.hours[x])[0],tv=byOrders?ty.orders:ty.sales;return `<tr><td style="font-weight:600;">${_cloudEsc(t.name)}</td><td>${ty.orders}</td><td>${fmt(ty.sales)}</td><td>${fmt(ty.sales/ty.orders)}</td><td>${Math.round(tv/totalV*1000)/10}%</td><td>${ty.hours[best]?label(best)+' ('+(byOrders?ty.hours[best]+' ออเดอร์':fmt(ty.hours[best]))+')':'—'}</td></tr>`;}).join('')
+     +'</tbody></table></div>';
+    if(typeRows.length>1){
+      const maxT=Math.max(...typeRows.flatMap(t=>shown.map(i=>types.get(t.key).hours[i])),1);
+      h+='<div style="margin-top:16px;font-weight:600;font-size:0.9rem;">แผนที่ความร้อน: ประเภทลูกค้า × ช่วงเวลา ('+(byOrders?'จำนวนออเดอร์':'ยอดขาย')+')</div>'+hoursHeat(typeRows.map(t=>({name:t.name,hours:types.get(t.key).hours})),shown,size,maxT,byOrders,label,fmt)+'</div>';
+    } else h+='</div>';
+  }
+  // ── แยกตามวัน + heatmap ──
   const dowRows=HOURS_DOW_ORDER.filter(d=>hoursSelectedDow.has(d)&&dow[d].orders);
   if(dowRows.length){
     const maxCell=Math.max(...dowRows.flatMap(d=>shown.map(i=>dow[d].hours[i])),1);
     h+='<div class="card"><div class="card-header"><div class="card-title">แยกตามวันในสัปดาห์</div></div><div class="table-wrap"><table><thead><tr><th>วัน</th><th>จำนวนวันที่ขาย</th><th>ออเดอร์</th><th>ยอดขาย</th><th>เฉลี่ย/วัน</th><th>ช่วงขายดีสุด</th></tr></thead><tbody>'
-     +dowRows.map(d=>{const best=[...shown].sort((x,y)=>dow[d].hours[y]-dow[d].hours[x])[0];return `<tr><td style="font-weight:600;">${HOURS_DOW_NAMES[d]}</td><td>${dow[d].days.size}</td><td>${dow[d].orders}</td><td>${fmt(dow[d].sales)}</td><td>${fmt(dow[d].sales/dow[d].days.size)}</td><td>${dow[d].hours[best]?label(best):'—'}</td></tr>`;}).join('')
+     +dowRows.map(d=>{const best=[...shown].sort((x,y)=>dow[d].hours[y]-dow[d].hours[x])[0];return `<tr><td style="font-weight:600;">${HOURS_DOW_NAMES[d]}</td><td>${dow[d].days.size}</td><td>${dow[d].orders}</td><td>${fmt(dow[d].sales)}</td><td>${byOrders?(Math.round(dow[d].orders/dow[d].days.size*10)/10)+' ออเดอร์':fmt(dow[d].sales/dow[d].days.size)}</td><td>${dow[d].hours[best]?label(best):'—'}</td></tr>`;}).join('')
      +'</tbody></table></div>'
-     +'<div style="margin-top:16px;font-weight:600;font-size:0.9rem;">แผนที่ความร้อน: ยอดขายวัน × ช่วงเวลา</div><div style="overflow-x:auto;margin-top:8px;"><table style="border-collapse:separate;border-spacing:2px;font-size:0.7rem;"><thead><tr><th></th>'
-     +shown.map(i=>`<th style="font-weight:500;color:var(--muted);">${hoursPad(Math.floor(i*size/60))}${size<60?':'+hoursPad((i*size)%60):''}</th>`).join('')+'</tr></thead><tbody>'
-     +dowRows.map(d=>`<tr><td style="font-weight:600;padding-right:6px;">${HOURS_DOW_NAMES[d]}</td>`+shown.map(i=>{const v=dow[d].hours[i],a=v?(0.12+0.88*v/maxCell):0;return `<td title="${HOURS_DOW_NAMES[d]} ${label(i)} · ${fmt(v)}" style="min-width:30px;height:28px;text-align:center;border-radius:4px;background:${v?`rgba(181,101,29,${a.toFixed(2)})`:'#f3efe9'};color:${a>0.55?'#fff':'inherit'};">${v?Math.round(v/100)/10+'k':''}</td>`;}).join('')+'</tr>').join('')
-     +'</tbody></table></div><div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">ตัวเลขเป็นพันบาท (k) · สีเข้ม = ยอดขายสูง</div></div>';
+     +'<div style="margin-top:16px;font-weight:600;font-size:0.9rem;">แผนที่ความร้อน: วัน × ช่วงเวลา ('+(byOrders?'จำนวนออเดอร์':'ยอดขาย')+')</div>'
+     +hoursHeat(dowRows.map(d=>({name:HOURS_DOW_NAMES[d],hours:dow[d].hours})),shown,size,maxCell,byOrders,label,fmt)+'</div>';
   }
   root.innerHTML=h;
+}
+function hoursHeat(rows,shown,size,maxV,byOrders,label,fmt){
+  return '<div style="overflow-x:auto;margin-top:8px;"><table style="border-collapse:separate;border-spacing:2px;font-size:0.7rem;"><thead><tr><th></th>'
+   +shown.map(i=>`<th style="font-weight:500;color:var(--muted);">${hoursPad(Math.floor(i*size/60))}${size<60?':'+hoursPad((i*size)%60):''}</th>`).join('')+'</tr></thead><tbody>'
+   +rows.map(r=>`<tr><td style="font-weight:600;padding-right:6px;white-space:nowrap;">${_cloudEsc(r.name)}</td>`+shown.map(i=>{const v=r.hours[i],a=v?(0.12+0.88*v/maxV):0;return `<td title="${_cloudEsc(r.name)} ${label(i)} · ${byOrders?v+' ออเดอร์':fmt(v)}" style="min-width:30px;height:28px;text-align:center;border-radius:4px;background:${v?`rgba(181,101,29,${a.toFixed(2)})`:'#f3efe9'};color:${a>0.55?'#fff':'inherit'};">${v?(byOrders?v:Math.round(v/100)/10+'k'):''}</td>`;}).join('')+'</tr>').join('')
+   +'</tbody></table></div><div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">'+(byOrders?'ตัวเลขคือจำนวนออเดอร์':'ตัวเลขเป็นพันบาท (k)')+' · สีเข้ม = สูง</div>';
 }
