@@ -85,7 +85,7 @@ let cartCustomer = null; // customer object or null
 let cartPromoIds = []; // array of promotion ids currently applied to the cart (supports multiple promos per order)
 let editingId = null;
 let currentPage = 'pos';
-let reportPeriod = {sales:'day', profit:'day', products:'day', expenses:'all'};
+let reportPeriod = {sales:'day', profit:'day', products:'day', expenses:'all', hours:'month'};
 let selectedOrderId = null;
 let editingCartIdx = null; // index of cart item being edited in item-editor
 let editingOrderId = null; // id of the order currently being edited via the POS cart, or null
@@ -250,7 +250,7 @@ const pageTitles = {
   pos:'หน้าขาย POS', orders:'รายการออเดอร์', menu:'จัดการเมนู',
   categories:'หมวดหมู่สินค้า', customers:'ลูกค้า', promotions:'โปรโมชั่น',
   ingredients:'วัตถุดิบ', expenses:'รายจ่าย', 'report-sales':'รายงานยอดขาย',
-  'report-profit':'กำไร-ขาดทุน', 'report-products':'สินค้าขายดี',
+  'report-profit':'กำไร-ขาดทุน', 'report-products':'สินค้าขายดี', 'report-hours':'ยอดขายตามช่วงเวลา',
   staff:'พนักงาน', settings:'ตั้งค่าระบบ'
 };
 function showPage(name) {
@@ -277,6 +277,7 @@ function showPage(name) {
   if(name==='report-sales') renderSalesReport();
   if(name==='report-profit') renderProfitReport();
   if(name==='report-products') renderTopProductsReport();
+  if(name==='report-hours') renderHoursReport();
   if(name==='settings') { loadSettings(); renderStaffControls(); loadAIConnection(); loadLineConnection(); renderSyncHealth(); }
 }
 
@@ -2587,6 +2588,7 @@ function switchReportTab(period, page) {
   if(page==='report-sales') renderSalesReport();
   if(page==='report-profit') renderProfitReport();
   if(page==='report-products') renderTopProductsReport();
+  if(page==='report-hours') renderHoursReport();
   if(page==='expenses') renderExpTable();
 }
 
@@ -4561,3 +4563,89 @@ function renderSyncHealth(){
 setInterval(()=>{if(typeof currentPage!=='undefined'&&currentPage==='settings'&&document.visibilityState==='visible')renderSyncHealth();},5000);
 // เตือนครั้งเดียวต่อรอบการเปิดแอป เมื่อพื้นที่เก็บข้อมูลในเครื่องใช้เกิน 70%
 setTimeout(()=>{try{if(typeof SyncEngine==='undefined')return;const st=SyncEngine.getHealth().storage;if(st.pct>=70)showToast('⚠️ พื้นที่เก็บข้อมูลในเครื่องใช้ไปแล้ว '+st.pct+'% — ดูรายละเอียดที่ ตั้งค่าระบบ > สุขภาพการซิงค์','error');}catch{}},8000);
+
+
+// ── ⏰ รายงานยอดขายตามช่วงเวลา (ช่วงไหนขายดี) — กรองตามวัน จ-อา ได้ ──
+const HOURS_DOW_NAMES=['อา','จ','อ','พ','พฤ','ศ','ส']; // ดัชนี = Date.getDay()
+const HOURS_DOW_ORDER=[1,2,3,4,5,6,0];                  // แสดงเรียง จ → อา
+let hoursSelectedDow=new Set([0,1,2,3,4,5,6]);
+function hoursParseTime(t){
+  const m=String(t||'').match(/(\d{1,2})[:.](\d{2})/); if(!m) return null;
+  let h=+m[1],mi=+m[2]; const s=String(t);
+  if(/pm|p\.m\./i.test(s)&&h<12) h+=12; else if(/am|a\.m\./i.test(s)&&h===12) h=0;
+  return (h>23||mi>59)?null:h*60+mi;
+}
+function hoursDow(dateStr){const p=String(dateStr||'').split('-');if(p.length<3)return null;const d=new Date(+p[0],+p[1]-1,+p[2]);return isNaN(d)?null:d.getDay();}
+function hoursToggleDow(d){if(hoursSelectedDow.has(d)){if(hoursSelectedDow.size>1)hoursSelectedDow.delete(d);}else hoursSelectedDow.add(d);renderHoursReport();}
+function hoursPresetDow(list){hoursSelectedDow=new Set(list);renderHoursReport();}
+function hoursPad(n){return String(n).padStart(2,'0');}
+function hoursLabel(startMin,size){const e=startMin+size;return hoursPad(Math.floor(startMin/60))+':'+hoursPad(startMin%60)+'–'+hoursPad(Math.floor((e%1440)/60))+':'+hoursPad(e%60);}
+function resetHoursPickerToNow(){resetPeriodPickerToNow('hours',reportPeriod.hours||'month',renderHoursReport);}
+function renderHoursReport(){
+  const root=document.getElementById('hoursReportBody'); if(!root) return;
+  const period=reportPeriod.hours||'month',key=syncPeriodPickers('hours',period,true);
+  const size=+(document.getElementById('hoursBucketSize')?.value||60);
+  const gp=DB.get('gpSettings',{instore:0,grab:32.1,lineman:32.1});
+  // ปุ่มเลือกวัน
+  const chipHtml=HOURS_DOW_ORDER.map(d=>`<button type="button" class="btn btn-sm ${hoursSelectedDow.has(d)?'btn-primary':'btn-ghost'}" style="min-width:44px;" onclick="hoursToggleDow(${d})">${HOURS_DOW_NAMES[d]}</button>`).join('');
+  document.getElementById('hoursDowChips').innerHTML=chipHtml;
+  const orders=getFilteredOrders(period,key);
+  const nBuckets=Math.ceil(1440/size);
+  const mk=()=>({orders:0,items:0,sales:0,net:0,days:new Set()});
+  const buckets=Array.from({length:nBuckets},mk), noTime=mk();
+  const dow=Array.from({length:7},()=>({orders:0,sales:0,days:new Set(),hours:Array.from({length:nBuckets},()=>0)}));
+  const activeDays=new Set(); let totalOrders=0,totalSales=0,totalNet=0;
+  orders.forEach(o=>{
+    const d=hoursDow(o.date); if(d===null||!hoursSelectedDow.has(d)) return;
+    const mins=hoursParseTime(o.time), b=mins===null?noTime:buckets[Math.min(nBuckets-1,Math.floor(mins/size))];
+    const items=(o.items||[]).reduce((n,i)=>n+(Number(i.qty)||0),0), net=orderAfterGp(o,gp);
+    b.orders++; b.items+=items; b.sales+=o.total; b.net+=net; b.days.add(o.date);
+    dow[d].orders++; dow[d].sales+=o.total; dow[d].days.add(o.date);
+    if(mins!==null) dow[d].hours[Math.min(nBuckets-1,Math.floor(mins/size))]+=o.total;
+    activeDays.add(o.date); totalOrders++; totalSales+=o.total; totalNet+=net;
+  });
+  if(!totalOrders){root.innerHTML='<div class="card" style="padding:24px;text-align:center;color:var(--muted);">ไม่มีออเดอร์ในช่วงที่เลือก</div>';return;}
+  // ตัดช่วงที่ไม่มีขายหัว-ท้ายวันออก
+  let first=buckets.findIndex(b=>b.orders), last=buckets.length-1-[...buckets].reverse().findIndex(b=>b.orders);
+  if(first<0){first=0;last=-1;}
+  const shown=[]; for(let i=first;i<=last;i++) shown.push(i);
+  const maxSales=Math.max(...shown.map(i=>buckets[i].sales),1);
+  const ranked=shown.filter(i=>buckets[i].orders).sort((x,y)=>buckets[y].sales-buckets[x].sales);
+  const topSet=new Set(ranked.slice(0,3));
+  const bestSales=ranked[0], bestOrders=[...shown].sort((x,y)=>buckets[y].orders-buckets[x].orders)[0];
+  const fmt=n=>'฿'+Math.round(n).toLocaleString();
+  const label=i=>hoursLabel(i*size,size);
+  let h='<div class="grid-4" style="margin-bottom:16px;">'
+   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">ออเดอร์ที่เลือก</div><div style="font-size:1.5rem;font-weight:700;">${totalOrders.toLocaleString()}</div><div style="font-size:0.75rem;color:var(--muted);">${activeDays.size} วันที่มีขาย</div></div>`
+   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">ยอดขายรวม</div><div style="font-size:1.5rem;font-weight:700;">${fmt(totalSales)}</div><div style="font-size:0.75rem;color:var(--muted);">หลังหัก GP ${fmt(totalNet)}</div></div>`
+   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">🔥 ช่วงขายดีสุด (ยอดเงิน)</div><div style="font-size:1.3rem;font-weight:700;">${bestSales!==undefined?label(bestSales):'—'}</div><div style="font-size:0.75rem;color:var(--muted);">${bestSales!==undefined?fmt(buckets[bestSales].sales)+' · '+Math.round(buckets[bestSales].sales/totalSales*100)+'%':''}</div></div>`
+   +`<div class="stat-card"><div style="color:var(--muted);font-size:0.8rem;">ช่วงที่ออเดอร์เยอะสุด</div><div style="font-size:1.3rem;font-weight:700;">${bestOrders!==undefined?label(bestOrders):'—'}</div><div style="font-size:0.75rem;color:var(--muted);">${bestOrders!==undefined?buckets[bestOrders].orders+' ออเดอร์':''}</div></div>`
+   +'</div>';
+  // กราฟแท่ง
+  h+='<div class="card" style="margin-bottom:16px;"><div class="card-header"><div class="card-title">กราฟยอดขายตามช่วงเวลา</div><div style="font-size:0.75rem;color:var(--muted);">แท่งสีเข้ม = 3 ช่วงขายดีสุด</div></div>'
+   +'<div style="overflow-x:auto;"><div style="display:flex;align-items:flex-end;gap:4px;height:160px;min-width:'+Math.max(320,shown.length*34)+'px;padding:0 4px;">'
+   +shown.map(i=>{const b=buckets[i],ht=Math.max(b.sales?3:0,Math.round(b.sales/maxSales*140));return `<div title="${label(i)} · ${b.orders} ออเดอร์ · ${fmt(b.sales)}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;min-width:26px;"><div style="font-size:0.6rem;color:var(--muted);">${b.sales?Math.round(b.sales).toLocaleString():''}</div><div style="width:100%;height:${ht}px;background:${topSet.has(i)?'var(--caramel,#b5651d)':'#d9c7b0'};border-radius:4px 4px 0 0;"></div></div>`;}).join('')
+   +'</div><div style="display:flex;gap:4px;min-width:'+Math.max(320,shown.length*34)+'px;padding:0 4px;">'
+   +shown.map(i=>`<div style="flex:1;min-width:26px;text-align:center;font-size:0.6rem;color:var(--muted);">${size>=60?hoursPad(Math.floor(i*size/60)):hoursPad(Math.floor(i*size/60))+':'+hoursPad((i*size)%60)}</div>`).join('')
+   +'</div></div></div>';
+  // ตารางช่วงเวลา
+  h+='<div class="card" style="margin-bottom:16px;"><div class="card-header"><div class="card-title">ตารางสรุปตามช่วงเวลา</div></div><div class="table-wrap"><table><thead><tr><th>ช่วงเวลา</th><th>ออเดอร์</th><th>สินค้า (ชิ้น)</th><th>ยอดขาย</th><th>หลังหัก GP</th><th>เฉลี่ย/ออเดอร์</th><th>เฉลี่ย/วัน</th><th>สัดส่วน</th></tr></thead><tbody>'
+   +shown.map(i=>{const b=buckets[i],rank=ranked.indexOf(i);const medal=rank===0?'🥇 ':rank===1?'🥈 ':rank===2?'🥉 ':'';
+     return `<tr${topSet.has(i)?' style="background:rgba(181,101,29,0.08);"':''}><td style="font-weight:600;">${medal}${label(i)}</td><td>${b.orders}</td><td>${b.items}</td><td style="font-weight:600;">${fmt(b.sales)}</td><td>${fmt(b.net)}</td><td>${b.orders?fmt(b.sales/b.orders):'—'}</td><td>${b.days.size?fmt(b.sales/b.days.size):'—'}</td><td>${Math.round(b.sales/totalSales*1000)/10}%</td></tr>`;}).join('')
+   +(noTime.orders?`<tr><td style="color:var(--muted);">ไม่ระบุเวลา</td><td>${noTime.orders}</td><td>${noTime.items}</td><td>${fmt(noTime.sales)}</td><td>${fmt(noTime.net)}</td><td>${fmt(noTime.sales/noTime.orders)}</td><td>—</td><td>${Math.round(noTime.sales/totalSales*1000)/10}%</td></tr>`:'')
+   +`<tr style="font-weight:700;"><td>รวม</td><td>${totalOrders}</td><td>${buckets.concat([noTime]).reduce((n,b)=>n+b.items,0)}</td><td>${fmt(totalSales)}</td><td>${fmt(totalNet)}</td><td>${fmt(totalSales/totalOrders)}</td><td>—</td><td>100%</td></tr>`
+   +'</tbody></table></div><div style="font-size:0.75rem;color:var(--muted);margin-top:8px;">“เฉลี่ย/วัน” = ยอดขายของช่วงนั้น ÷ จำนวนวันที่ช่วงนั้นมีออเดอร์ · ไม่รวมออเดอร์ที่ยกเลิก</div></div>';
+  // สรุปรายวัน + heatmap
+  const dowRows=HOURS_DOW_ORDER.filter(d=>hoursSelectedDow.has(d)&&dow[d].orders);
+  if(dowRows.length){
+    const maxCell=Math.max(...dowRows.flatMap(d=>shown.map(i=>dow[d].hours[i])),1);
+    h+='<div class="card"><div class="card-header"><div class="card-title">แยกตามวันในสัปดาห์</div></div><div class="table-wrap"><table><thead><tr><th>วัน</th><th>จำนวนวันที่ขาย</th><th>ออเดอร์</th><th>ยอดขาย</th><th>เฉลี่ย/วัน</th><th>ช่วงขายดีสุด</th></tr></thead><tbody>'
+     +dowRows.map(d=>{const best=[...shown].sort((x,y)=>dow[d].hours[y]-dow[d].hours[x])[0];return `<tr><td style="font-weight:600;">${HOURS_DOW_NAMES[d]}</td><td>${dow[d].days.size}</td><td>${dow[d].orders}</td><td>${fmt(dow[d].sales)}</td><td>${fmt(dow[d].sales/dow[d].days.size)}</td><td>${dow[d].hours[best]?label(best):'—'}</td></tr>`;}).join('')
+     +'</tbody></table></div>'
+     +'<div style="margin-top:16px;font-weight:600;font-size:0.9rem;">แผนที่ความร้อน: ยอดขายวัน × ช่วงเวลา</div><div style="overflow-x:auto;margin-top:8px;"><table style="border-collapse:separate;border-spacing:2px;font-size:0.7rem;"><thead><tr><th></th>'
+     +shown.map(i=>`<th style="font-weight:500;color:var(--muted);">${hoursPad(Math.floor(i*size/60))}${size<60?':'+hoursPad((i*size)%60):''}</th>`).join('')+'</tr></thead><tbody>'
+     +dowRows.map(d=>`<tr><td style="font-weight:600;padding-right:6px;">${HOURS_DOW_NAMES[d]}</td>`+shown.map(i=>{const v=dow[d].hours[i],a=v?(0.12+0.88*v/maxCell):0;return `<td title="${HOURS_DOW_NAMES[d]} ${label(i)} · ${fmt(v)}" style="min-width:30px;height:28px;text-align:center;border-radius:4px;background:${v?`rgba(181,101,29,${a.toFixed(2)})`:'#f3efe9'};color:${a>0.55?'#fff':'inherit'};">${v?Math.round(v/100)/10+'k':''}</td>`;}).join('')+'</tr>').join('')
+     +'</tbody></table></div><div style="font-size:0.7rem;color:var(--muted);margin-top:6px;">ตัวเลขเป็นพันบาท (k) · สีเข้ม = ยอดขายสูง</div></div>';
+  }
+  root.innerHTML=h;
+}
