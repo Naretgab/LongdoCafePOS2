@@ -1,14 +1,14 @@
 // Long Do POS — Service Worker
 // ⚠️ เปลี่ยนเลขเวอร์ชันนี้ทุกครั้งที่แก้ไข app.js / index.html เพื่อบังคับอัปเดตแอป
-const CACHE = 'longdo-pos-v49';
+const CACHE = 'longdo-pos-v50';
 const ASSETS = [
   './',
   './index.html',
-  './app.js?v=49',
-  './supabase-sync.js?v=49',
+  './app.js?v=50',
+  './supabase-sync.js?v=50',
   './manifest.json',
   'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Sarabun:wght@300;400;500;600&display=swap',
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.min.js',
 ];
 
 self.addEventListener('install', e => {

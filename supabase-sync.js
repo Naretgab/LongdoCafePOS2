@@ -145,11 +145,36 @@ const SyncEngine = (() => {
   const QUEUE_KEY = 'ld_syncQueue';
   const SNAP_PREFIX = 'ld_syncSnapshot_';
 
+  // Snapshot = แผนที่ id → ลายเซ็น (hash) ของแต่ละรายการ แทนการเก็บสำเนาข้อมูลทั้งก้อน
+  // ใช้แค่ตรวจว่า "รายการไหนเปลี่ยน" ประหยัดพื้นที่ localStorage ลงเกือบครึ่งหนึ่งของที่แอปใช้เดิม
+  function sigOf(rec) {
+    const str = JSON.stringify(rec);
+    let h1 = 5381, h2 = 52711;
+    for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = ((h1 << 5) + h1) ^ c; h2 = ((h2 * 33) ^ c) | 0; }
+    return (h1 >>> 0).toString(36) + '.' + (h2 >>> 0).toString(36) + '.' + str.length.toString(36);
+  }
+  function readSnap(key) {
+    let raw = null;
+    try { raw = JSON.parse(localStorage.getItem(SNAP_PREFIX + key) || 'null'); } catch {}
+    const map = new Map();
+    if (Array.isArray(raw)) { for (const r of raw) map.set(String(r.id), sigOf(r)); }          // รูปแบบเก่า (เก็บทั้งก้อน)
+    else if (raw && raw.v === 2 && raw.m) { for (const id of Object.keys(raw.m)) map.set(id, raw.m[id]); }
+    return map;
+  }
+  function writeSnap(key, arr) {
+    const m = {};
+    for (const r of arr) m[String(r.id)] = sigOf(r);
+    try { localStorage.setItem(SNAP_PREFIX + key, JSON.stringify({ v: 2, m })); return true; }
+    catch { try { localStorage.removeItem(SNAP_PREFIX + key); } catch {} return false; }
+  }
+
   let client = null;
   let ready = false;
   let flushing = false;
   let statusEl = null;
   let rtChannel = null;
+  let rtState = 'off';      // off | connecting | connected | reconnecting
+  let lastOkAt = 0, lastError = '';
   let pulling = false;
   let catching = false;
   let lastCatchup = 0;
@@ -165,6 +190,7 @@ const SyncEngine = (() => {
   }
 
   function setStatus(state) {
+    if (state === 'synced') { lastOkAt = Date.now(); lastError = ''; }
     if (!statusEl) statusEl = document.getElementById('syncStatusDot');
     if (!statusEl) return;
     statusEl.dataset.state = state;
@@ -207,6 +233,7 @@ const SyncEngine = (() => {
       setStatus('synced');
     } catch (e) {
       console.error('[sync] flush failed, will retry:', e.message || e);
+      lastError = 'ส่งขึ้นคลาวด์ไม่สำเร็จ: ' + (e.message || e);
       setStatus('error');
     } finally {
       flushing = false;
@@ -331,7 +358,7 @@ const SyncEngine = (() => {
       });
       saveQueue(q);
       for (const t of report.tables) {
-        if (doneKeys.has(t.key) && includeDiff) localStorage.setItem(SNAP_PREFIX + t.key, JSON.stringify(DB.get(t.key)));
+        if (doneKeys.has(t.key) && includeDiff) writeSnap(t.key, DB.get(t.key));
       }
     } catch (e) { console.error('[sync] queue cleanup failed', e); }
 
@@ -370,8 +397,7 @@ const SyncEngine = (() => {
           try {
             const json = JSON.stringify(merged);
             localStorage.setItem('ld_' + key, json);
-            try { localStorage.setItem(SNAP_PREFIX + key, json); }
-            catch (qe) { localStorage.removeItem(SNAP_PREFIX + key); } // snapshot เป็นแค่ตัวช่วย diff — ถ้าพื้นที่เต็มให้ข้าม ข้อมูลจริงสำคัญกว่า
+            writeSnap(key, merged); // ถ้าพื้นที่เต็มจะข้าม snapshot — ข้อมูลจริงสำคัญกว่า
           } catch (qe) {
             throw new Error('บันทึกลงเครื่องไม่สำเร็จ (พื้นที่จัดเก็บเต็ม?) ' + (qe.message || qe));
           }
@@ -407,6 +433,37 @@ const SyncEngine = (() => {
     return result;
   }
 
+
+  // ── สุขภาพการซิงค์ + การใช้พื้นที่เก็บข้อมูลในเครื่อง (ใช้กับหน้าตั้งค่า) ──
+  const STORAGE_LIMIT_CHARS = 5000000; // โควต้า localStorage ของเบราว์เซอร์ทั่วไปประมาณ 5 ล้านตัวอักษร (ประมาณการ)
+  function storageUsage() {
+    let used = 0; const per = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i), v = localStorage.getItem(k) || '';
+        const n = k.length + v.length; used += n; per.push({ key: k, chars: n });
+      }
+    } catch {}
+    per.sort((a, b) => b.chars - a.chars);
+    return { usedChars: used, limitChars: STORAGE_LIMIT_CHARS, pct: Math.round(used / STORAGE_LIMIT_CHARS * 100), top: per.slice(0, 4) };
+  }
+  function getHealth() {
+    return {
+      configured: configured(), ready, online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+      rtState, lastOkAt, lastPullAt, queue: loadQueue().length, lastError, storage: storageUsage(),
+    };
+  }
+  function reconnect() { if (!ready) return; rtRetryDelay = 3000; subscribeRealtime(); catchUp('manual', true); }
+  function retryQueue() { return flushQueue(); }
+  function migrateSnapshots() {
+    for (const key of Object.keys(SYNC_TABLES)) {
+      try {
+        const raw = JSON.parse(localStorage.getItem(SNAP_PREFIX + key) || 'null');
+        if (Array.isArray(raw)) writeSnap(key, raw); // แปลงรูปแบบเก่า (ทั้งก้อน) เป็นแบบย่อ ลดพื้นที่ที่ใช้
+      } catch {}
+    }
+  }
+
   // ── called from DB.set() ──────────────────────────────────────
   function onSet(key, value) {
     if (!ready) return; // local-only mode: nothing to do
@@ -419,24 +476,22 @@ const SyncEngine = (() => {
 
     if (!SYNC_TABLES[key]) return;
     const newArr = value;
-    const snapKey = SNAP_PREFIX + key;
-    let prev = [];
-    try { prev = JSON.parse(localStorage.getItem(snapKey) || '[]'); } catch {}
-    const prevMap = new Map(prev.map(r => [r.id, r]));
+    const prevSig = readSnap(key);
     const newMap = new Map(newArr.map(r => [r.id, r]));
 
     const changed = [];
     for (const [id, rec] of newMap) {
-      const old = prevMap.get(id);
-      if (!old || JSON.stringify(old) !== JSON.stringify(rec)) changed.push(rec);
+      const old = prevSig.get(String(id));
+      if (!old || old !== sigOf(rec)) changed.push(rec);
     }
     const removedIds = [];
-    for (const id of prevMap.keys()) if (!newMap.has(id)) removedIds.push(id);
+    const newKeys = new Set([...newMap.keys()].map(String));
+    for (const id of prevSig.keys()) if (!newKeys.has(id)) removedIds.push(Number(id));
 
     if (changed.length) enqueue({ op: 'upsert', key, rows: changed.map(toRow[key]) });
     if (removedIds.length) enqueue({ op: 'delete', key, ids: removedIds });
 
-    localStorage.setItem(snapKey, JSON.stringify(newArr));
+    writeSnap(key, newArr);
     if (changed.length || removedIds.length) flushQueue();
   }
 
@@ -454,16 +509,16 @@ const SyncEngine = (() => {
 
         if ((!rows || rows.length === 0) && local.length > 0) {
           await upsertInBatches(table, local.map(toRow[key]));
-          localStorage.setItem(SNAP_PREFIX + key, JSON.stringify(local));
+          writeSnap(key, local);
         } else if (rows && rows.length > 0) {
           const remoteRecs = rows.map(fromRow[key]);
           const remoteIds = new Set(remoteRecs.map(r => r.id));
           const localOnly = local.filter(r => !remoteIds.has(r.id));
           const merged = [...remoteRecs, ...localOnly].sort((a, b) => a.id - b.id);
-          localStorage.setItem(SNAP_PREFIX + key, JSON.stringify(merged));
+          writeSnap(key, merged);
           DB.set(key, merged);
         } else {
-          localStorage.setItem(SNAP_PREFIX + key, JSON.stringify(local));
+          writeSnap(key, local);
         }
       } catch (e) {
         console.error('[sync] bootstrap failed for', table, e.message || e);
@@ -517,14 +572,18 @@ const SyncEngine = (() => {
     }
     channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, handleRemoteSettingChange);
     rtChannel = channel;
+    rtState = 'connecting';
     channel.subscribe((status, err) => {
       if (channel !== rtChannel) return; // ช่องเก่าที่เราปิดเอง — ไม่ต้องทำอะไร
       if (status === 'SUBSCRIBED') {
         rtRetryDelay = 3000;
+        rtState = 'connected';
         setStatus('synced');
         catchUp('subscribed', true); // ดึงสิ่งที่พลาดไประหว่างที่หลุด
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         console.warn('[sync] realtime', status, err || '');
+        rtState = 'reconnecting';
+        lastError = 'Realtime หลุด (' + status + ') — กำลังต่อใหม่';
         setStatus('error');
         if (!rtRetryTimer) {
           rtRetryTimer = setTimeout(() => { rtRetryTimer = null; subscribeRealtime(); }, rtRetryDelay);
@@ -547,7 +606,7 @@ const SyncEngine = (() => {
     const merged = [...map.values()].sort((a, b) => a.id - b.id);
     const json = JSON.stringify(merged);
     localStorage.setItem('ld_' + key, json); // ถ้าพื้นที่เต็มจะ throw ให้ผู้เรียกจับ
-    try { localStorage.setItem(SNAP_PREFIX + key, json); } catch { try { localStorage.removeItem(SNAP_PREFIX + key); } catch {} }
+    writeSnap(key, merged);
     return true;
   }
 
@@ -587,6 +646,7 @@ const SyncEngine = (() => {
       setStatus('synced');
     } catch (e) {
       console.warn('[sync] catch-up failed (' + reason + '):', e.message || e);
+      lastError = 'ดึงข้อมูลใหม่ไม่สำเร็จ: ' + (e.message || e);
       setStatus('error');
     } finally {
       catching = false;
@@ -606,7 +666,7 @@ const SyncEngine = (() => {
       try {
         const json = JSON.stringify(merged);
         localStorage.setItem('ld_' + key, json);
-        try { localStorage.setItem(SNAP_PREFIX + key, json); } catch { try { localStorage.removeItem(SNAP_PREFIX + key); } catch {} }
+        writeSnap(key, merged);
       } catch (e) {
         console.error('[sync] realtime: บันทึกลงเครื่องไม่สำเร็จ (พื้นที่เต็ม?)', e);
         setStatus('error');
@@ -635,6 +695,7 @@ const SyncEngine = (() => {
     if (typeof supabase === 'undefined') { console.warn('[sync] supabase-js failed to load — running local-only.'); setStatus('off'); return; }
     client = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
     ready = true;
+    migrateSnapshots();
     window.addEventListener('online', () => { flushQueue(); subscribeRealtime(); catchUp('online', true); });
     // กลับมาเปิดแอป/สลับแท็บ/เครื่องตื่น → ดึงของที่พลาดทันที
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') catchUp('visible'); });
@@ -645,5 +706,5 @@ const SyncEngine = (() => {
     bootstrap();
   }
 
-  return { init, onSet, compare, apply, pullAll, isReady };
+  return { init, onSet, compare, apply, pullAll, isReady, getHealth, reconnect, retryQueue };
 })();

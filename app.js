@@ -277,7 +277,7 @@ function showPage(name) {
   if(name==='report-sales') renderSalesReport();
   if(name==='report-profit') renderProfitReport();
   if(name==='report-products') renderTopProductsReport();
-  if(name==='settings') { loadSettings(); renderStaffControls(); loadAIConnection(); loadLineConnection(); }
+  if(name==='settings') { loadSettings(); renderStaffControls(); loadAIConnection(); loadLineConnection(); renderSyncHealth(); }
 }
 
 function toggleSidebar() {
@@ -4528,3 +4528,36 @@ function exportSalesCsv(){
     showToast(`ส่งออก ${oRows.length} ออเดอร์ / ${iRows.length} รายการสินค้า (ไม่รวมที่ยกเลิก)`,'success');
   }catch(e){console.error(e);showToast('ส่งออก CSV ไม่สำเร็จ: '+(e.message||e),'error');}
 }
+
+
+// ── 🩺 สุขภาพการซิงค์ + เตือนพื้นที่เก็บข้อมูลเต็ม ──
+function _agoText(ts){if(!ts)return 'ยังไม่เคย';const s=Math.max(0,Math.round((Date.now()-ts)/1000));if(s<60)return s+' วินาทีที่แล้ว';if(s<3600)return Math.round(s/60)+' นาทีที่แล้ว';if(s<86400)return Math.round(s/3600)+' ชั่วโมงที่แล้ว';return Math.round(s/86400)+' วันที่แล้ว';}
+function _kb(chars){return (chars*2/1024).toLocaleString(undefined,{maximumFractionDigits:0})+' KB';}
+function renderSyncHealth(){
+  const box=document.getElementById('syncHealthBox'); if(!box) return;
+  if(typeof SyncEngine==='undefined'){box.textContent='ไม่พบโมดูลซิงค์';return;}
+  const h=SyncEngine.getHealth(),st=h.storage;
+  const rtMap={connected:['🟢','เชื่อมต่ออยู่'],connecting:['🟡','กำลังเชื่อมต่อ…'],reconnecting:['🔴','หลุด — กำลังต่อใหม่'],off:['⚪','ไม่ได้ใช้งาน']};
+  const rt=h.ready?(rtMap[h.rtState]||rtMap.off):['⚪','ยังไม่ได้เชื่อมต่อ Supabase'];
+  const barColor=st.pct>=85?'var(--red)':st.pct>=70?'#f5a623':'#2ecc71';
+  const row=(k,v)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid var(--border,#eee);"><span style="color:var(--muted)">${k}</span><span style="text-align:right;font-weight:600;">${v}</span></div>`;
+  let html=row('อินเทอร์เน็ต',h.online?'🟢 ออนไลน์':'🔴 ออฟไลน์')
+    +row('Realtime',rt[0]+' '+rt[1])
+    +row('ซิงค์สำเร็จล่าสุด',_agoText(h.lastOkAt))
+    +row('ดึงข้อมูลจากคลาวด์ล่าสุด',_agoText(h.lastPullAt))
+    +row('รายการรอส่งขึ้นคลาวด์',h.queue?('<span style="color:#e67e22">'+h.queue+' งาน</span>'):'0');
+  if(h.lastError) html+='<div style="color:var(--red);margin:8px 0;">⚠️ '+_cloudEsc(h.lastError)+'</div>';
+  html+='<div style="margin-top:12px;"><div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">พื้นที่เก็บข้อมูลในเครื่อง (ประมาณ)</span><b>'+st.pct+'% · '+_kb(st.usedChars)+'</b></div>'
+    +'<div style="height:8px;background:#eee;border-radius:4px;overflow:hidden;margin:6px 0;"><div style="height:100%;width:'+Math.min(100,st.pct)+'%;background:'+barColor+';"></div></div>'
+    +'<div style="font-size:0.75rem;color:var(--muted);">ใหญ่สุด: '+st.top.map(t=>_cloudEsc(t.key.replace(/^ld_/,''))+' '+_kb(t.chars)).join(' · ')+'</div>'
+    +(st.pct>=70?'<div style="font-size:0.8rem;color:#e67e22;margin-top:6px;">⚠️ พื้นที่ใกล้เต็ม — กด “ส่งออกข้อมูล” สำรองไว้ และแจ้งผู้ดูแลระบบให้จัดการก่อนเต็ม</div>':'')+'</div>';
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">'
+    +'<button class="btn btn-ghost btn-sm" onclick="renderSyncHealth()">🔄 รีเฟรชสถานะ</button>'
+    +'<button class="btn btn-ghost btn-sm" onclick="SyncEngine.reconnect();setTimeout(renderSyncHealth,1500)">🔌 ต่อ Realtime ใหม่</button>'
+    +(h.queue?'<button class="btn btn-ghost btn-sm" onclick="SyncEngine.retryQueue();setTimeout(renderSyncHealth,1500)">⬆️ ลองส่งงานค้างใหม่</button>':'')
+    +'</div>';
+  box.innerHTML=html;
+}
+setInterval(()=>{if(typeof currentPage!=='undefined'&&currentPage==='settings'&&document.visibilityState==='visible')renderSyncHealth();},5000);
+// เตือนครั้งเดียวต่อรอบการเปิดแอป เมื่อพื้นที่เก็บข้อมูลในเครื่องใช้เกิน 70%
+setTimeout(()=>{try{if(typeof SyncEngine==='undefined')return;const st=SyncEngine.getHealth().storage;if(st.pct>=70)showToast('⚠️ พื้นที่เก็บข้อมูลในเครื่องใช้ไปแล้ว '+st.pct+'% — ดูรายละเอียดที่ ตั้งค่าระบบ > สุขภาพการซิงค์','error');}catch{}},8000);
